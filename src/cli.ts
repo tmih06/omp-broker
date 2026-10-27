@@ -6,6 +6,8 @@ import type { OAuthAuthInfo, OAuthPrompt } from "@oh-my-pi/pi-ai/registry/oauth"
 import {
 	DEFAULT_BIND,
 	VERSION,
+	bindHost,
+	bindPort,
 	isLoopbackBind,
 	resolveToken,
 	providerOrder,
@@ -42,10 +44,10 @@ interface CliValues {
 }
 
 function printHelp(): void {
-	console.log(`omp-gateway v${VERSION} — OpenAI/Anthropic-compatible API for omp subscription logins
+	console.log(`omp-broker v${VERSION} — OpenAI/Anthropic-compatible API for omp subscription logins
 
 USAGE
-  omp-gateway <command> [options]
+  omp-broker <command> [options]
 
 COMMANDS
   serve                 Start the gateway (default ${DEFAULT_BIND})
@@ -55,15 +57,16 @@ COMMANDS
   providers             Show providers available for login
   models                List models served by authenticated providers
   token                 Print the gateway bearer token
+  healthcheck           Probe the local /healthz endpoint (container healthcheck)
 
 OPTIONS
-  --bind <host:port>    Listen address (env: OMP_GATEWAY_BIND)
+  --bind <host:port>    Listen address (env: OMP_BROKER_BIND)
   --token <token>       Use this bearer instead of the token file
   --no-auth             Disable bearer auth (loopback binds only)
   --allow-remote        Permit --no-auth on a non-loopback bind
   --db <path>           Use an isolated SQLite credential store
   --omp                  Force the omp credential store (default)
-  --isolated            Use ~/.omp-gateway/auth.db
+  --isolated            Use ~/.omp-broker/auth.db
   --agent-dir <path>    omp profile agent directory
   --manual              Login: also accept a pasted redirect URL or code
   --all                 Logout: remove every provider
@@ -136,7 +139,7 @@ function modelRows(models: Model<Api>[]): string[][] {
 }
 
 async function commandServe(values: CliValues): Promise<void> {
-	const bind = stringValue(values.bind) ?? process.env.OMP_GATEWAY_BIND?.trim() ?? DEFAULT_BIND;
+	const bind = stringValue(values.bind) ?? process.env.OMP_BROKER_BIND?.trim() ?? DEFAULT_BIND;
 	const noAuth = Boolean(values["no-auth"]);
 	if (noAuth && !isLoopbackBind(bind) && !values["allow-remote"]) {
 		throw new Error(
@@ -163,7 +166,7 @@ async function commandServe(values: CliValues): Promise<void> {
 	const providers = running.catalog.providers();
 	const modelCount = running.catalog.list().length;
 
-	console.log(`omp-gateway v${VERSION} listening on ${running.url}`);
+	console.log(`omp-broker v${VERSION} listening on ${running.url}`);
 	console.log(`storage:   ${opened.label}`);
 	console.log(`auth:      ${authLabel}`);
 	console.log(
@@ -214,7 +217,7 @@ async function commandLogin(values: CliValues, positionals: string[]): Promise<v
 			for (const provider of providers) {
 				console.error(`  ${provider.id.padEnd(22)} ${provider.name}`);
 			}
-			throw new Error("Usage: omp-gateway login <provider>");
+			throw new Error("Usage: omp-broker login <provider>");
 		}
 
 		const definition = loginProvider(providerId);
@@ -288,7 +291,7 @@ async function commandLogout(values: CliValues, positionals: string[]): Promise<
 		}
 
 		const provider = positionals[1];
-		if (!provider) throw new Error("Usage: omp-gateway logout <provider> (or --all)");
+		if (!provider) throw new Error("Usage: omp-broker logout <provider> (or --all)");
 		const existed = await removeProvider(opened.storage, provider);
 		console.log(
 			existed ? `Removed stored credentials for ${provider}.` : `No stored credentials for ${provider}.`,
@@ -386,6 +389,18 @@ async function commandModels(values: CliValues): Promise<void> {
 	}
 }
 
+async function commandHealthcheck(values: CliValues): Promise<void> {
+	const bind = stringValue(values.bind) ?? process.env.OMP_BROKER_BIND?.trim() ?? DEFAULT_BIND;
+	const host = bindHost(bind);
+	const urlHost = host === "0.0.0.0" || host === "::" || host === "[::]" ? "127.0.0.1" : host;
+	const response = await fetch(`http://${urlHost}:${bindPort(bind)}/healthz`, {
+		signal: AbortSignal.timeout(3_000),
+	});
+	if (!response.ok) throw new Error(`healthcheck failed: ${response.status}`);
+	const body = (await response.json()) as { ok?: boolean };
+	if (!body.ok) throw new Error("healthcheck failed: not ok");
+}
+
 async function commandToken(values: CliValues): Promise<void> {
 	const resolved = await resolveToken({
 		explicit: stringValue(values.token),
@@ -428,7 +443,7 @@ async function main(): Promise<void> {
 
 	const typed = values as CliValues;
 	if (typed.version) {
-		console.log(`omp-gateway ${VERSION}`);
+		console.log(`omp-broker ${VERSION}`);
 		return;
 	}
 	if (typed.help || positionals.length === 0) {
@@ -457,6 +472,9 @@ async function main(): Promise<void> {
 			return;
 		case "token":
 			await commandToken(typed);
+			return;
+		case "healthcheck":
+			await commandHealthcheck(typed);
 			return;
 		default:
 			printHelp();

@@ -1,0 +1,25 @@
+name: omp-broker-api
+
+services:
+  omp-broker:
+    build:
+      context: .
+    image: omp-broker:latest
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      # Keep loopback by default; put TLS/reverse proxy in front for remote clients.
+      - "127.0.0.1:4000:4000"
+    volumes:
+      # Credentials, token, and extracted native addon live here — not on the host.
+      - omp-broker-data:/data
+    healthcheck:
+      test: ["CMD", "omp-broker", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  omp-broker-data:

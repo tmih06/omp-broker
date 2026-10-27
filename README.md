@@ -1,10 +1,10 @@
-# omp-gateway
+# omp-broker
 
 OpenAI- and Anthropic-compatible HTTP gateway backed by [omp](https://omp.sh) subscription logins. One process, one bearer token, any client that speaks `/v1/chat/completions`, `/v1/messages`, or `/v1/responses` — routed through `@oh-my-pi/pi-ai` to the provider account you already log in with.
 
 ```mermaid
 flowchart LR
-  C[OpenAI / Anthropic SDK] -->|Bearer or x-api-key| G[omp-gateway]
+  C[OpenAI / Anthropic SDK] -->|Bearer or x-api-key| G[omp-broker]
   G --> S[(omp credential store)]
   G --> T[wire translation + credential injection]
   T -->|OAuth| A[Anthropic Pro/Max]
@@ -18,7 +18,7 @@ The gateway never exposes upstream access tokens to clients. It resolves `model`
 
 ## Quick start
 
-Requires Bun ≥ 1.3.14.
+Requires Bun ≥ 1.4.4.
 
 ```bash
 bun install
@@ -54,13 +54,13 @@ curl -s http://127.0.0.1:4000/v1/messages \
 // OpenAI
 const openai = new OpenAI({
   baseURL: "http://127.0.0.1:4000/v1",
-  apiKey: process.env.OMP_GATEWAY_TOKEN,
+  apiKey: process.env.OMP_BROKER_TOKEN,
 });
 
 // Anthropic (sends x-api-key)
 const anthropic = new Anthropic({
   baseURL: "http://127.0.0.1:4000",
-  apiKey: process.env.OMP_GATEWAY_TOKEN,
+  apiKey: process.env.OMP_BROKER_TOKEN,
 });
 ```
 
@@ -74,7 +74,7 @@ bun run models --all           # full bundled catalog
 bun run models --provider anthropic
 ```
 
-Bare ids resolve through a fixed preference order (`anthropic`, `openai-codex`, `github-copilot`, `google-antigravity`, `google-gemini-cli`, then the other authenticated providers). Override it with `OMP_GATEWAY_PROVIDER_ORDER=a,b,c`. Unknown ids return `404`; a known model without a credential returns `401` with the provider name.
+Bare ids resolve through a fixed preference order (`anthropic`, `openai-codex`, `github-copilot`, `google-antigravity`, `google-gemini-cli`, then the other authenticated providers). Override it with `OMP_BROKER_PROVIDER_ORDER=a,b,c`. Unknown ids return `404`; a known model without a credential returns `401` with the provider name.
 
 ## Commands
 
@@ -88,6 +88,7 @@ Bare ids resolve through a fixed preference order (`anthropic`, `openai-codex`, 
 | `bun run providers` | List providers available for login and which are stored |
 | `bun run models` | List served models |
 | `bun run token` | Print the gateway bearer token |
+| `bun run healthcheck` | Probe the local `/healthz` endpoint |
 
 Useful flags: `--bind host:port`, `--token`, `--no-auth`, `--db path`, `--isolated`, `--omp`, `--agent-dir path`, `--manual`, `--json`, `--regenerate`, `--all`, `--yes`.
 
@@ -110,10 +111,11 @@ By default the gateway uses the same credential store as omp: `~/.omp/agent/agen
 | Mode | Selection | Location |
 | --- | --- | --- |
 | omp (default) | nothing / `--omp` | `~/.omp/agent/agent.db` or configured broker |
-| isolated | `--isolated` or `OMP_GATEWAY_STORAGE=local` | `~/.omp-gateway/auth.db` |
-| explicit | `--db path` or `OMP_GATEWAY_DB` | `path` |
+| isolated | `--isolated` or `OMP_BROKER_STORAGE=local` | `~/.omp-broker/auth.db` |
+| explicit | `--db path` or `OMP_BROKER_DB` | `path` |
+| container | image defaults | `/data/auth.db` on the `omp-broker-data` volume |
 
-`--agent-dir` targets another omp profile. `PI_CODING_AGENT_DIR` is honored by omp's discovery as usual.
+`--agent-dir` targets another omp profile. `PI_CODING_AGENT_DIR` is honored by omp's discovery as usual. The container image sets `OMP_BROKER_STORAGE=local` and an explicit `/data/auth.db`, so it never reads the host's omp store.
 
 ## Endpoints
 
@@ -134,26 +136,53 @@ Auth accepts `Authorization: Bearer <token>` and Anthropic's `x-api-key: <token>
 
 ```bash
 bun run build
-# dist/omp-gateway — one executable, native addon embedded
+# dist/omp-broker — one executable, native addon embedded
 
-OMP_GATEWAY_TOKEN=change-me ./dist/omp-gateway serve --bind=0.0.0.0:4000
+OMP_BROKER_TOKEN=change-me ./dist/omp-broker serve --bind=0.0.0.0:4000
 ```
 
-The first run extracts `pi_natives` into `$OMP_GATEWAY_HOME/natives/<version>/` (about 100 MB); later runs reuse it. Override the location with `PI_NATIVES_DIR`. The binary is large because it contains the full provider stack plus that addon. Build on the target OS/architecture — Bun does not cross-compile the N-API addon.
+The build uses `--aot --trim --minify` and embeds a zstd-compressed `pi_natives` addon, producing a ~158 MB executable. On Linux most of the reduction currently comes from compression rather than `--trim`; both flags are wired in for newer Bun runtimes. The first run extracts the addon into `$OMP_BROKER_HOME/natives/<version>/` (~107 MB), then reuses it. Override the location with `PI_NATIVES_DIR`. Build on the target OS/architecture — Bun does not cross-compile the N-API addon.
+
+## Docker
+
+```bash
+docker compose build
+docker compose up -d
+docker compose exec omp-broker omp-broker token
+```
+
+The image is multi-stage and runs on distroless Debian 12 as UID 10001, with no shell or Bun runtime. It is about 99 MB compressed. All state lives on the `omp-broker-data` volume:
+
+```text
+/data/auth.db        credential SQLite database (isolated from the host)
+/data/broker.token   generated gateway bearer token
+/data/natives/       extracted pi_natives addon
+```
+
+The container does not mount or read `~/.omp/agent/agent.db`. Log in inside the container, or publish the provider's OAuth callback port for the login run:
+
+```bash
+docker compose exec -it omp-broker omp-broker login openai-codex --manual
+# or, for a callback flow:
+docker compose run --rm --service-ports -p 1455:1455 omp-broker login openai-codex
+```
+
+Compose publishes `127.0.0.1:4000` only; put TLS and auth-aware reverse proxy in front for remote clients. To use a bind mount instead of the named volume, `chown 10001:10001` the host directory. Rotate the token with `docker compose exec omp-broker omp-broker token --regenerate`.
 
 ## Configuration
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `OMP_GATEWAY_BIND` | `127.0.0.1:4000` | Listen address |
-| `OMP_GATEWAY_TOKEN` | token file | Bearer token override |
-| `OMP_GATEWAY_HOME` | `~/.omp-gateway` | Token (and isolated DB) directory |
-| `OMP_GATEWAY_DB` | — | Explicit credential SQLite path |
-| `OMP_GATEWAY_STORAGE` | `omp` | `omp` or `local` |
-| `OMP_GATEWAY_AGENT_DIR` | — | omp agent/profile directory |
-| `OMP_GATEWAY_PROVIDER_ORDER` | see Models | Comma-separated bare-id provider preference |
+| `OMP_BROKER_BIND` | `127.0.0.1:4000` | Listen address |
+| `OMP_BROKER_TOKEN` | token file | Bearer token override |
+| `OMP_BROKER_HOME` | `~/.omp-broker` | Token (and isolated DB) directory |
+| `OMP_BROKER_DB` | — | Explicit credential SQLite path |
+| `OMP_BROKER_STORAGE` | `omp` | `omp` or `local` |
+| `OMP_BROKER_AGENT_DIR` | — | omp agent/profile directory |
+| `OMP_BROKER_PROVIDER_ORDER` | see Models | Comma-separated bare-id provider preference |
+| `PI_NATIVES_DIR` | `$OMP_BROKER_HOME/natives` | Extracted native addon directory |
 
-The token lives at `$OMP_GATEWAY_HOME/gateway.token` (mode `0600`) and is generated on first use. `bun run token --regenerate` replaces it; an env or `--token` value always takes precedence.
+The token lives at `$OMP_BROKER_HOME/broker.token` (mode `0600`) and is generated on first use. In the container that is `/data/broker.token`. `bun run token --regenerate` replaces it; an env or `--token` value always takes precedence.
 
 ## Troubleshooting
 
@@ -166,6 +195,7 @@ The token lives at `$OMP_GATEWAY_HOME/gateway.token` (mode `0600`) and is genera
 ## Security notes
 
 - Binds to loopback by default. Put TLS and network policy in front of it before exposing it.
+- The Docker image runs non-root on distroless; only `/data` is writable.
 - `--no-auth` is refused on non-loopback binds unless `--allow-remote` is passed.
 - Tokens, refresh tokens, and API keys are never written to logs or responses; upstream auth is injected server-side.
 - OAuth subscription endpoints are sanctioned for their providers' own clients. Check your provider's terms before sharing access with other users or workloads.

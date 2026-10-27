@@ -1,11 +1,11 @@
 {
-  "name": "omp-gateway",
-  "version": "0.1.0",
+  "name": "omp-broker",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "OpenAI- and Anthropic-compatible API gateway backed by omp subscription logins",
   "bin": {
-    "omp-gateway": "./src/bin.ts"
+    "omp-broker": "./src/bin.ts"
   },
   "scripts": {
     "start": "bun run src/cli.ts serve",
@@ -19,7 +19,10 @@
     "providers": "bun run src/cli.ts providers",
     "token": "bun run src/cli.ts token",
     "build": "bun run scripts/build.ts",
-    "serve:bin": "./dist/omp-gateway serve"
+    "serve:bin": "./dist/omp-broker serve",
+    "docker:build": "docker build -t omp-broker:latest .",
+    "docker:up": "docker compose up -d --build",
+    "healthcheck": "bun run src/cli.ts healthcheck"
   },
   "dependencies": {
     "@oh-my-pi/pi-ai": "18.13.1",
@@ -30,6 +33,6 @@
     "typescript": "^5.9.3"
   },
   "engines": {
-    "bun": ">=1.3.14"
+    "bun": ">=1.4.4"
   }
 }

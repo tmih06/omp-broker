@@ -59,7 +59,7 @@ describe("model catalog", () => {
 	});
 
 	test("storage availability sees stored and runtime credentials", async () => {
-		const dir = await mkdtemp(path.join(tmpdir(), "omp-gateway-models-"));
+		const dir = await mkdtemp(path.join(tmpdir(), "omp-broker-models-"));
 		const storage = await AuthStorage.create(path.join(dir, "auth.db"));
 		try {
 			storage.keys.setRuntime("aiand", "test");

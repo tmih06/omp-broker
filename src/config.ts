@@ -3,7 +3,7 @@ import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import * as path from "node:path";
 
-export const VERSION = "0.1.0";
+export const VERSION = "0.2.0";
 export const DEFAULT_BIND = "127.0.0.1:4000";
 
 /**
@@ -25,21 +25,21 @@ export function resolveUserPath(input: string): string {
 	return path.resolve(trimmed);
 }
 
-export function gatewayHome(): string {
-	const override = process.env.OMP_GATEWAY_HOME?.trim();
-	return override ? resolveUserPath(override) : path.join(homedir(), ".omp-gateway");
+export function brokerHome(): string {
+	const override = process.env.OMP_BROKER_HOME?.trim();
+	return override ? resolveUserPath(override) : path.join(homedir(), ".omp-broker");
 }
 
 export function defaultDbPath(): string {
-	return path.join(gatewayHome(), "auth.db");
+	return path.join(brokerHome(), "auth.db");
 }
 
 export function tokenFilePath(): string {
-	return path.join(gatewayHome(), "gateway.token");
+	return path.join(brokerHome(), "broker.token");
 }
 
 export function providerOrder(): string[] {
-	const extra = (process.env.OMP_GATEWAY_PROVIDER_ORDER ?? "")
+	const extra = (process.env.OMP_BROKER_PROVIDER_ORDER ?? "")
 		.split(",")
 		.map(value => value.trim())
 		.filter(Boolean);
@@ -71,7 +71,7 @@ async function readTokenFile(): Promise<string | undefined> {
 }
 
 /**
- * Resolve the gateway bearer. Precedence: `--token`, `OMP_GATEWAY_TOKEN`, the
+ * Resolve the gateway bearer. Precedence: `--token`, `OMP_BROKER_TOKEN`, the
  * token file. A missing or empty file is created on first use.
  */
 export async function resolveToken(options: {
@@ -85,7 +85,7 @@ export async function resolveToken(options: {
 		return { token: explicit, source: "flag" };
 	}
 
-	const env = process.env.OMP_GATEWAY_TOKEN?.trim();
+	const env = process.env.OMP_BROKER_TOKEN?.trim();
 	if (env) {
 		if (options.regenerate) await writeTokenFile(randomBytes(32).toString("base64url"));
 		return { token: env, source: "env" };
@@ -104,6 +104,12 @@ export function bindHost(bind: string): string {
 	let host = colon >= 0 ? trimmed.slice(0, colon) : trimmed;
 	if (host.startsWith("[") && host.endsWith("]")) host = host.slice(1, -1);
 	return host;
+}
+
+export function bindPort(bind: string): number {
+	const trimmed = bind.trim();
+	if (/^\d+$/.test(trimmed)) return Number.parseInt(trimmed, 10);
+	return Number.parseInt(trimmed.slice(trimmed.lastIndexOf(":") + 1), 10);
 }
 
 export function isLoopbackBind(bind: string): boolean {

@@ -38,7 +38,7 @@ let storage: AuthStorage;
 let gateway: RunningGateway;
 
 beforeAll(async () => {
-	dir = await mkdtemp(path.join(tmpdir(), "omp-gateway-test-"));
+	dir = await mkdtemp(path.join(tmpdir(), "omp-broker-test-"));
 	storage = await AuthStorage.create(path.join(dir, "auth.db"));
 	storage.keys.setRuntime("aiand", "upstream-key");
 	gateway = await startGateway({
