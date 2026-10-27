@@ -30,6 +30,25 @@ updates:
           - "minor"
           - "patch"
 
+  # Frontend packages in web/bun.lock.
+  - package-ecosystem: "bun"
+    directory: "/web"
+    schedule:
+      interval: "daily"
+      time: "04:47"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    groups:
+      frontend:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
   # Action pins in .github/workflows.
   - package-ecosystem: "github-actions"
     directory: "/"

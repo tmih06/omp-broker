@@ -76,6 +76,19 @@ bun run models --provider anthropic
 
 Bare ids resolve through a fixed preference order (`anthropic`, `openai-codex`, `github-copilot`, `google-antigravity`, `google-gemini-cli`, then the other authenticated providers). Override it with `OMP_BROKER_PROVIDER_ORDER=a,b,c`. Unknown ids return `404`; a known model without a credential returns `401` with the provider name.
 
+## Frontend
+
+`web/` is a Vite + React 19 console wired to the [Arc](https://uiarc.dev) component registry. Arc items are copied into `web/src/components/arc`, not installed as an npm package.
+
+```bash
+cd web
+bun install
+bun run dev      # http://127.0.0.1:5173
+bun run build    # typecheck + production bundle
+```
+
+Add more items from `web/` with the shadcn CLI, for example `bunx shadcn@latest add @uiarc/dialog`. The registry is declared in `web/components.json`. The gateway does not serve the bundle; run the dev server, or host `web/dist` separately.
+
 ## Commands
 
 | Command                     | Purpose                                                   |

@@ -9,7 +9,8 @@ export default defineConfig({
 		printWidth: 120,
 		arrowParens: "avoid",
 		sortPackageJson: false,
-		// Harness/skill state is local to this checkout, not part of the repo.
+		// Agent skill assets are maintained by their own tooling; they are not
+		// application code.
 		ignorePatterns: [".agents/**", "skills-lock.json"],
 		overrides: [
 			{

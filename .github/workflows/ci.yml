@@ -36,6 +36,26 @@ jobs:
       - name: Lint
         run: bun run lint -- --deny-warnings
 
+  web:
+    name: Web build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Typecheck and build
+        run: bun run build
+
   test:
     name: Test (${{ matrix.os }}, Bun ${{ matrix.bun }})
     runs-on: ${{ matrix.os }}
