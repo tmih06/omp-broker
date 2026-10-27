@@ -74,10 +74,12 @@ async function readTokenFile(): Promise<string | undefined> {
  * Resolve the gateway bearer. Precedence: `--token`, `OMP_BROKER_TOKEN`, the
  * token file. A missing or empty file is created on first use.
  */
-export async function resolveToken(options: {
-	explicit?: string;
-	regenerate?: boolean;
-} = {}): Promise<ResolvedToken> {
+export async function resolveToken(
+	options: {
+		explicit?: string;
+		regenerate?: boolean;
+	} = {},
+): Promise<ResolvedToken> {
 	const explicit = options.explicit?.trim();
 	if (explicit) {
 		// Regeneration only owns the file; an explicit or env token still wins.
@@ -114,10 +116,5 @@ export function bindPort(bind: string): number {
 
 export function isLoopbackBind(bind: string): boolean {
 	const host = bindHost(bind).toLowerCase();
-	return (
-		host === "localhost" ||
-		host === "::1" ||
-		host === "0:0:0:0:0:0:0:1" ||
-		host.startsWith("127.")
-	);
+	return host === "localhost" || host === "::1" || host === "0:0:0:0:0:0:0:1" || host.startsWith("127.");
 }

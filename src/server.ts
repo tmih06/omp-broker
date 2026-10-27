@@ -1,20 +1,10 @@
 import { createAuthGatewayRouter } from "@oh-my-pi/pi-ai/auth-gateway";
-import {
-	corsHeaders,
-	hasMisplacedBearer,
-	isAuthorized,
-	json,
-	withCors,
-} from "@oh-my-pi/pi-ai/auth-gateway/http";
+import { corsHeaders, hasMisplacedBearer, isAuthorized, json, withCors } from "@oh-my-pi/pi-ai/auth-gateway/http";
 import type { AuthStorage } from "@oh-my-pi/pi-ai/auth-storage";
 import type { Api, FetchImpl, Model } from "@oh-my-pi/pi-ai";
 import { parseBind } from "@oh-my-pi/pi-ai/utils/parse-bind";
 import { DEFAULT_BIND, VERSION } from "./config";
-import {
-	createModelCatalog,
-	storageProviderAvailability,
-	type ModelCatalog,
-} from "./models";
+import { createModelCatalog, storageProviderAvailability, type ModelCatalog } from "./models";
 
 export interface StartGatewayOptions {
 	storage: AuthStorage;

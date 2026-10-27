@@ -17,8 +17,7 @@ if (nativeVersion) {
 	}) as EmbeddedFile[];
 	if (addons.length > 0) {
 		const configured = process.env.PI_NATIVES_DIR?.trim();
-		const base =
-			configured && path.isAbsolute(configured) ? configured : path.join(brokerHome(), "natives");
+		const base = configured && path.isAbsolute(configured) ? configured : path.join(brokerHome(), "natives");
 		const targetDir = path.join(base, nativeVersion);
 		for (const addon of addons) {
 			const compressed = addon.name.endsWith(".zst");
@@ -27,9 +26,7 @@ if (nativeVersion) {
 			if (existsSync(target)) continue;
 			await mkdir(targetDir, { recursive: true, mode: 0o700 });
 			const temp = `${target}.${process.pid}.tmp`;
-			const data = compressed
-				? Bun.zstdDecompressSync(await addon.arrayBuffer())
-				: addon;
+			const data = compressed ? Bun.zstdDecompressSync(await addon.arrayBuffer()) : addon;
 			await Bun.write(temp, data);
 			await rename(temp, target);
 		}

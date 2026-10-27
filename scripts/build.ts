@@ -20,9 +20,7 @@ let nativeDir: string;
 try {
 	nativeDir = path.dirname(require.resolve(`@oh-my-pi/pi-natives-${tag}`));
 } catch {
-	throw new Error(
-		`Missing @oh-my-pi/pi-natives-${tag}. Install dependencies on the target platform before building.`,
-	);
+	throw new Error(`Missing @oh-my-pi/pi-natives-${tag}. Install dependencies on the target platform before building.`);
 }
 const addons = readdirSync(nativeDir).filter(file => file.endsWith(".node"));
 if (addons.length === 0) throw new Error(`No .node addon found in ${nativeDir}`);

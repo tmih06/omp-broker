@@ -50,10 +50,7 @@ export function collectBundledChatModels(): Model<Api>[] {
 }
 
 export function createModelCatalog(options: ModelCatalogOptions = {}): ModelCatalog {
-	const ordered = [
-		...(options.providerOrder ?? []),
-		...DEFAULT_PROVIDER_ORDER,
-	];
+	const ordered = [...(options.providerOrder ?? []), ...DEFAULT_PROVIDER_ORDER];
 	const rank = new Map<string, number>();
 	for (const provider of ordered) if (!rank.has(provider)) rank.set(provider, rank.size);
 
@@ -94,8 +91,7 @@ export function createModelCatalog(options: ModelCatalogOptions = {}): ModelCata
 	const sortModels = (models: readonly Model<Api>[]): Model<Api>[] =>
 		[...models].sort(
 			(a, b) =>
-				(rank.get(a.provider) ?? Number.MAX_SAFE_INTEGER) -
-					(rank.get(b.provider) ?? Number.MAX_SAFE_INTEGER) ||
+				(rank.get(a.provider) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.provider) ?? Number.MAX_SAFE_INTEGER) ||
 				a.provider.localeCompare(b.provider) ||
 				a.id.localeCompare(b.id),
 		);
@@ -138,8 +134,7 @@ export function createModelCatalog(options: ModelCatalogOptions = {}): ModelCata
 			const models: Model<Api>[] = [];
 			for (const provider of [...byProvider.keys()].sort(
 				(a, b) =>
-					(rank.get(a) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b) ?? Number.MAX_SAFE_INTEGER) ||
-					a.localeCompare(b),
+					(rank.get(a) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b) ?? Number.MAX_SAFE_INTEGER) || a.localeCompare(b),
 			)) {
 				if (isAvailable(provider)) models.push(...(byProvider.get(provider) ?? []));
 			}
@@ -153,8 +148,7 @@ export function createModelCatalog(options: ModelCatalogOptions = {}): ModelCata
 				.filter(provider => isAvailable(provider))
 				.sort(
 					(a, b) =>
-						(rank.get(a) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b) ?? Number.MAX_SAFE_INTEGER) ||
-						a.localeCompare(b),
+						(rank.get(a) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b) ?? Number.MAX_SAFE_INTEGER) || a.localeCompare(b),
 				);
 		},
 	};

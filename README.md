@@ -78,17 +78,17 @@ Bare ids resolve through a fixed preference order (`anthropic`, `openai-codex`, 
 
 ## Commands
 
-| Command | Purpose |
-| --- | --- |
-| `bun run serve` | Start the gateway on `127.0.0.1:4000` |
-| `bun run login <provider>` | OAuth or API-key login, persisted to the credential store |
-| `bun run logout <provider>` | Remove one provider's stored credentials |
-| `bun run logout --all` | Remove every stored credential (confirmation required) |
-| `bun run status` | Show stored credentials, accounts, and token expiry |
-| `bun run providers` | List providers available for login and which are stored |
-| `bun run models` | List served models |
-| `bun run token` | Print the gateway bearer token |
-| `bun run healthcheck` | Probe the local `/healthz` endpoint |
+| Command                     | Purpose                                                   |
+| --------------------------- | --------------------------------------------------------- |
+| `bun run serve`             | Start the gateway on `127.0.0.1:4000`                     |
+| `bun run login <provider>`  | OAuth or API-key login, persisted to the credential store |
+| `bun run logout <provider>` | Remove one provider's stored credentials                  |
+| `bun run logout --all`      | Remove every stored credential (confirmation required)    |
+| `bun run status`            | Show stored credentials, accounts, and token expiry       |
+| `bun run providers`         | List providers available for login and which are stored   |
+| `bun run models`            | List served models                                        |
+| `bun run token`             | Print the gateway bearer token                            |
+| `bun run healthcheck`       | Probe the local `/healthz` endpoint                       |
 
 Useful flags: `--bind host:port`, `--token`, `--no-auth`, `--db path`, `--isolated`, `--omp`, `--agent-dir path`, `--manual`, `--json`, `--regenerate`, `--all`, `--yes`.
 
@@ -108,27 +108,27 @@ When the provider uses a loopback callback, the flow prints the URL; open it on 
 
 By default the gateway uses the same credential store as omp: `~/.omp/agent/agent.db`, or the remote auth-broker when `~/.omp/config.yml` / `OMP_AUTH_BROKER_URL` configures one. Existing `omp login` subscriptions therefore work immediately, and logins made through `omp` and this CLI are interchangeable. The gateway polls the store every five seconds, so a login in another process is picked up without a restart.
 
-| Mode | Selection | Location |
-| --- | --- | --- |
-| omp (default) | nothing / `--omp` | `~/.omp/agent/agent.db` or configured broker |
-| isolated | `--isolated` or `OMP_BROKER_STORAGE=local` | `~/.omp-broker/auth.db` |
-| explicit | `--db path` or `OMP_BROKER_DB` | `path` |
-| container | image defaults | `/data/auth.db` on the `omp-broker-data` volume |
+| Mode          | Selection                                  | Location                                        |
+| ------------- | ------------------------------------------ | ----------------------------------------------- |
+| omp (default) | nothing / `--omp`                          | `~/.omp/agent/agent.db` or configured broker    |
+| isolated      | `--isolated` or `OMP_BROKER_STORAGE=local` | `~/.omp-broker/auth.db`                         |
+| explicit      | `--db path` or `OMP_BROKER_DB`             | `path`                                          |
+| container     | image defaults                             | `/data/auth.db` on the `omp-broker-data` volume |
 
 `--agent-dir` targets another omp profile. `PI_CODING_AGENT_DIR` is honored by omp's discovery as usual. The container image sets `OMP_BROKER_STORAGE=local` and an explicit `/data/auth.db`, so it never reads the host's omp store.
 
 ## Endpoints
 
-| Method | Path | Notes |
-| --- | --- | --- |
-| POST | `/v1/chat/completions` | OpenAI chat-completions, streaming or JSON |
-| POST | `/v1/messages` | Anthropic Messages, streaming or JSON |
-| POST | `/v1/responses` | OpenAI Responses |
-| POST | `/v1/pi/stream` | Native pi-ai event stream |
-| GET | `/v1/models` | Models with credentials |
-| GET | `/v1/usage` | Provider quota/usage for authenticated accounts |
-| GET | `/v1/credentials/check` | Per-credential auth probe |
-| GET | `/healthz` | Unauthenticated liveness |
+| Method | Path                    | Notes                                           |
+| ------ | ----------------------- | ----------------------------------------------- |
+| POST   | `/v1/chat/completions`  | OpenAI chat-completions, streaming or JSON      |
+| POST   | `/v1/messages`          | Anthropic Messages, streaming or JSON           |
+| POST   | `/v1/responses`         | OpenAI Responses                                |
+| POST   | `/v1/pi/stream`         | Native pi-ai event stream                       |
+| GET    | `/v1/models`            | Models with credentials                         |
+| GET    | `/v1/usage`             | Provider quota/usage for authenticated accounts |
+| GET    | `/v1/credentials/check` | Per-credential auth probe                       |
+| GET    | `/healthz`              | Unauthenticated liveness                        |
 
 Auth accepts `Authorization: Bearer <token>` and Anthropic's `x-api-key: <token>`. CORS preflight is handled for browser clients.
 
@@ -171,16 +171,16 @@ Compose publishes `127.0.0.1:4000` only; put TLS and auth-aware reverse proxy in
 
 ## Configuration
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `OMP_BROKER_BIND` | `127.0.0.1:4000` | Listen address |
-| `OMP_BROKER_TOKEN` | token file | Bearer token override |
-| `OMP_BROKER_HOME` | `~/.omp-broker` | Token (and isolated DB) directory |
-| `OMP_BROKER_DB` | — | Explicit credential SQLite path |
-| `OMP_BROKER_STORAGE` | `omp` | `omp` or `local` |
-| `OMP_BROKER_AGENT_DIR` | — | omp agent/profile directory |
-| `OMP_BROKER_PROVIDER_ORDER` | see Models | Comma-separated bare-id provider preference |
-| `PI_NATIVES_DIR` | `$OMP_BROKER_HOME/natives` | Extracted native addon directory |
+| Variable                    | Default                    | Purpose                                     |
+| --------------------------- | -------------------------- | ------------------------------------------- |
+| `OMP_BROKER_BIND`           | `127.0.0.1:4000`           | Listen address                              |
+| `OMP_BROKER_TOKEN`          | token file                 | Bearer token override                       |
+| `OMP_BROKER_HOME`           | `~/.omp-broker`            | Token (and isolated DB) directory           |
+| `OMP_BROKER_DB`             | —                          | Explicit credential SQLite path             |
+| `OMP_BROKER_STORAGE`        | `omp`                      | `omp` or `local`                            |
+| `OMP_BROKER_AGENT_DIR`      | —                          | omp agent/profile directory                 |
+| `OMP_BROKER_PROVIDER_ORDER` | see Models                 | Comma-separated bare-id provider preference |
+| `PI_NATIVES_DIR`            | `$OMP_BROKER_HOME/natives` | Extracted native addon directory            |
 
 The token lives at `$OMP_BROKER_HOME/broker.token` (mode `0600`) and is generated on first use. In the container that is `/data/broker.token`. `bun run token --regenerate` replaces it; an env or `--token` value always takes precedence.
 
@@ -205,7 +205,11 @@ The token lives at `$OMP_BROKER_HOME/broker.token` (mode `0600`) and is generate
 ```bash
 bun test        # protocol round-trips against a mock upstream + catalog tests
 bun run check   # tsc --noEmit
+bun run fmt     # Oxfmt via Vite+
+bun run lint    # Oxlint via Vite+
 ```
+
+`bun run fmt:check` verifies formatting without writing; lint and format settings live in `vite.config.ts`.
 
 The e2e test starts the real Bun server with injected `fetch`, exercises OpenAI chat (JSON + SSE), Anthropic Messages (JSON with `x-api-key`), OpenAI Responses, auth failures, and model listing.
 

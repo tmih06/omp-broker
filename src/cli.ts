@@ -3,22 +3,8 @@ import { parseArgs } from "node:util";
 import type { Api, Model } from "@oh-my-pi/pi-ai";
 import type { OAuthLoginIdentity } from "@oh-my-pi/pi-ai/auth-storage";
 import type { OAuthAuthInfo, OAuthPrompt } from "@oh-my-pi/pi-ai/registry/oauth";
-import {
-	DEFAULT_BIND,
-	VERSION,
-	bindHost,
-	bindPort,
-	isLoopbackBind,
-	resolveToken,
-	providerOrder,
-} from "./config";
-import {
-	credentialRows,
-	listLoginProviders,
-	loginProvider,
-	removeProvider,
-	storedProviders,
-} from "./credentials";
+import { DEFAULT_BIND, VERSION, bindHost, bindPort, isLoopbackBind, resolveToken, providerOrder } from "./config";
+import { credentialRows, listLoginProviders, loginProvider, removeProvider, storedProviders } from "./credentials";
 import { createModelCatalog, storageProviderAvailability } from "./models";
 import { Prompter } from "./prompt";
 import { startGateway } from "./server";
@@ -105,11 +91,12 @@ function storageOptions(values: CliValues): StorageOptions {
 }
 
 function printTable(headers: string[], rows: string[][]): void {
-	const widths = headers.map((header, index) =>
-		Math.max(header.length, ...rows.map(row => row[index]?.length ?? 0)),
-	);
+	const widths = headers.map((header, index) => Math.max(header.length, ...rows.map(row => row[index]?.length ?? 0)));
 	const line = (cells: string[]) =>
-		cells.map((cell, index) => cell.padEnd(widths[index] ?? cell.length)).join("  ").trimEnd();
+		cells
+			.map((cell, index) => cell.padEnd(widths[index] ?? cell.length))
+			.join("  ")
+			.trimEnd();
 	console.log(line(headers));
 	console.log(widths.map(width => "-".repeat(width)).join("  "));
 	for (const row of rows) console.log(line(row));
@@ -153,8 +140,7 @@ async function commandServe(values: CliValues): Promise<void> {
 	if (!noAuth) {
 		const resolved = await resolveToken({ explicit: stringValue(values.token) });
 		bearerTokens = [resolved.token];
-		authLabel =
-			resolved.source === "file" ? `bearer token ${resolved.path}` : `bearer token from ${resolved.source}`;
+		authLabel = resolved.source === "file" ? `bearer token ${resolved.path}` : `bearer token from ${resolved.source}`;
 	}
 
 	const running = await startGateway({
@@ -169,9 +155,7 @@ async function commandServe(values: CliValues): Promise<void> {
 	console.log(`omp-broker v${VERSION} listening on ${running.url}`);
 	console.log(`storage:   ${opened.label}`);
 	console.log(`auth:      ${authLabel}`);
-	console.log(
-		`providers: ${providers.length > 0 ? providers.join(", ") : "(none — run `bun run login <provider>`)"}`,
-	);
+	console.log(`providers: ${providers.length > 0 ? providers.join(", ") : "(none — run `bun run login <provider>`)"}`);
 	console.log(`models:    ${modelCount}`);
 	console.log("endpoints: POST /v1/chat/completions, POST /v1/messages, POST /v1/responses");
 	console.log("           GET /v1/models, GET /v1/usage, GET /healthz");
@@ -293,9 +277,7 @@ async function commandLogout(values: CliValues, positionals: string[]): Promise<
 		const provider = positionals[1];
 		if (!provider) throw new Error("Usage: omp-broker logout <provider> (or --all)");
 		const existed = await removeProvider(opened.storage, provider);
-		console.log(
-			existed ? `Removed stored credentials for ${provider}.` : `No stored credentials for ${provider}.`,
-		);
+		console.log(existed ? `Removed stored credentials for ${provider}.` : `No stored credentials for ${provider}.`);
 	} finally {
 		prompter.close();
 		opened.storage.close();
@@ -379,10 +361,7 @@ async function commandModels(values: CliValues): Promise<void> {
 			console.log("No models. Log in first (`bun run login <provider>`) or pass --all for the full catalog.");
 			return;
 		}
-		printTable(
-			["PROVIDER", "MODEL", "NAME", "CONTEXT", "OUTPUT", "INPUT"],
-			modelRows(models),
-		);
+		printTable(["PROVIDER", "MODEL", "NAME", "CONTEXT", "OUTPUT", "INPUT"], modelRows(models));
 		console.log(`\n${models.length} model(s). Use the provider/model id in requests.`);
 	} finally {
 		opened.storage.close();
