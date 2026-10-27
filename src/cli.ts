@@ -7,6 +7,7 @@ import { DEFAULT_BIND, VERSION, bindHost, bindPort, isLoopbackBind, resolveToken
 import { credentialRows, listLoginProviders, loginProvider, removeProvider, storedProviders } from "./credentials";
 import { createModelCatalog, storageProviderAvailability } from "./models";
 import { Prompter } from "./prompt";
+import { RequestLog } from "./request-log";
 import { startGateway } from "./server";
 import { openStorage, type StorageOptions } from "./storage";
 
@@ -68,6 +69,8 @@ ENDPOINTS
   POST /v1/responses           OpenAI Responses
   GET  /v1/models              Models with credentials
   GET  /v1/usage               Provider quota/usage
+  GET  /v1/logs                Recent request history
+  GET  /v1/logs/stats          Dashboard aggregates
   GET  /healthz                Liveness
 
 EXAMPLES
@@ -135,6 +138,12 @@ async function commandServe(values: CliValues): Promise<void> {
 	}
 
 	const opened = await openStorage(storageOptions(values));
+	let requestLog: RequestLog | undefined;
+	try {
+		requestLog = RequestLog.open();
+	} catch (error) {
+		console.error(`request logging disabled: ${error instanceof Error ? error.message : String(error)}`);
+	}
 	let bearerTokens: string[] = [];
 	let authLabel = "disabled (--no-auth)";
 	if (!noAuth) {
@@ -148,6 +157,7 @@ async function commandServe(values: CliValues): Promise<void> {
 		bearerTokens,
 		bind,
 		providerOrder: providerOrder(),
+		requestLog,
 	});
 	const providers = running.catalog.providers();
 	const modelCount = running.catalog.list().length;
@@ -157,8 +167,9 @@ async function commandServe(values: CliValues): Promise<void> {
 	console.log(`auth:      ${authLabel}`);
 	console.log(`providers: ${providers.length > 0 ? providers.join(", ") : "(none — run `bun run login <provider>`)"}`);
 	console.log(`models:    ${modelCount}`);
+	console.log(`logs:      ${requestLog?.path ?? "disabled"}`);
 	console.log("endpoints: POST /v1/chat/completions, POST /v1/messages, POST /v1/responses");
-	console.log("           GET /v1/models, GET /v1/usage, GET /healthz");
+	console.log("           GET /v1/models, /v1/usage, /v1/logs, /v1/logs/stats, /healthz");
 
 	if (noAuth) console.warn("warning: the gateway accepts unauthenticated requests");
 	if (providers.length === 0) {
@@ -179,6 +190,7 @@ async function commandServe(values: CliValues): Promise<void> {
 		console.log(`\n${signal} received; shutting down`);
 		clearInterval(poll);
 		await running.close().catch(error => console.error("gateway close failed:", error));
+		requestLog?.close();
 		opened.storage.close();
 		process.exit(0);
 	};

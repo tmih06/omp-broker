@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { AuthStorage } from "@oh-my-pi/pi-ai/auth-storage";
 import { getBundledModel } from "@oh-my-pi/pi-catalog";
+import { RequestLog } from "../src/request-log";
 import { startGateway, type RunningGateway } from "../src/server";
 
 const model = getBundledModel("aiand", "deepseek-ai/deepseek-v4-flash");
@@ -35,24 +36,28 @@ const mockFetch = (async (input: string | URL | Request, init?: RequestInit) => 
 
 let dir: string;
 let storage: AuthStorage;
+let requestLog: RequestLog;
 let gateway: RunningGateway;
 
 beforeAll(async () => {
 	dir = await mkdtemp(path.join(tmpdir(), "omp-broker-test-"));
 	storage = await AuthStorage.create(path.join(dir, "auth.db"));
 	storage.keys.setRuntime("aiand", "upstream-key");
+	requestLog = RequestLog.open({ dbPath: path.join(dir, "requests.db") });
 	gateway = await startGateway({
 		storage,
 		bearerTokens: [TOKEN],
 		bind: "127.0.0.1:0",
 		models: [model],
 		fetch: mockFetch,
+		requestLog,
 		version: "test",
 	});
 });
 
 afterAll(async () => {
 	await gateway?.close();
+	requestLog?.close();
 	storage?.close();
 	await rm(dir, { recursive: true, force: true });
 });
@@ -194,5 +199,45 @@ describe("gateway", () => {
 		expect(res.status).toBe(404);
 		const body = (await res.json()) as { error: { message: string } };
 		expect(body.error.message).toContain("Unknown model");
+	});
+
+	test("records API requests and serves the log behind auth", async () => {
+		const ok = await fetch(`${gateway.url}/v1/models`, { headers: { authorization: `Bearer ${TOKEN}` } });
+		expect(ok.status).toBe(200);
+
+		const unauthorized = await fetch(`${gateway.url}/v1/logs`);
+		expect(unauthorized.status).toBe(401);
+
+		const list = await fetch(`${gateway.url}/v1/logs?limit=10`, {
+			headers: { authorization: `Bearer ${TOKEN}` },
+		});
+		expect(list.status).toBe(200);
+		const body = (await list.json()) as {
+			object: string;
+			data: { method: string; path: string; status: number }[];
+		};
+		expect(body.object).toBe("list");
+		expect(body.data).toContainEqual(expect.objectContaining({ method: "GET", path: "/v1/models", status: 200 }));
+		expect(body.data.some(entry => entry.path === "/healthz")).toBe(false);
+
+		const stats = await fetch(`${gateway.url}/v1/logs/stats?days=7`, {
+			headers: { authorization: `Bearer ${TOKEN}` },
+		});
+		expect(stats.status).toBe(200);
+		const aggregate = (await stats.json()) as {
+			days: number;
+			series: unknown[];
+			usage: unknown[];
+			summary: { requests: number };
+		};
+		expect(aggregate.days).toBe(7);
+		expect(aggregate.series).toHaveLength(7);
+		expect(aggregate.usage).toHaveLength(30);
+		expect(aggregate.summary.requests).toBeGreaterThan(0);
+
+		const badDays = await fetch(`${gateway.url}/v1/logs/stats?days=0`, {
+			headers: { authorization: `Bearer ${TOKEN}` },
+		});
+		expect(badDays.status).toBe(400);
 	});
 });

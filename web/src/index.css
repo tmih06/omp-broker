@@ -1,41 +1,440 @@
+@import "tailwindcss";
+
+/* Arc themes through data-theme; point shadcn's dark variant at the same switch. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+@theme inline {
+	--color-background: var(--background);
+	--color-foreground: var(--foreground);
+	--color-card: var(--surface);
+	--color-card-foreground: var(--foreground);
+	--color-popover: var(--surface-raised);
+	--color-popover-foreground: var(--foreground);
+	--color-primary: var(--accent);
+	--color-primary-foreground: var(--accent-foreground);
+	--color-secondary: var(--surface-muted);
+	--color-secondary-foreground: var(--foreground);
+	--color-muted: var(--surface-muted);
+	--color-muted-foreground: var(--text-muted);
+	--color-accent: var(--surface-muted);
+	--color-accent-foreground: var(--foreground);
+	--color-destructive: var(--danger);
+	--color-destructive-foreground: var(--background);
+	--color-border: var(--border);
+	--color-input: var(--border);
+	--color-ring: var(--accent);
+	--color-success: var(--success);
+	--color-warning: var(--warning);
+	--color-danger: var(--danger);
+
+	--color-sidebar: var(--sidebar);
+	--color-sidebar-foreground: var(--sidebar-foreground);
+	--color-sidebar-primary: var(--sidebar-primary);
+	--color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+	--color-sidebar-accent: var(--sidebar-accent);
+	--color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+	--color-sidebar-border: var(--sidebar-border);
+	--color-sidebar-ring: var(--sidebar-ring);
+
+	--font-sans: var(--font-body);
+
+	--radius-sm: 2px;
+	--radius-md: 4px;
+	--radius-lg: 6px;
+	--radius-xl: 6px;
+	--radius-2xl: 8px;
+}
+
+:root {
+	/* Circle/Linear geometry: controls 4px, panels 6px, surfaces 8px. */
+	--radius-control: 4px;
+	--radius-panel: 6px;
+	--radius-surface: 8px;
+	--radius-pill: 3px;
+	--font-body: "Geist Variable", sans-serif;
+	--sidebar: oklch(18.5% 0 0);
+	--sidebar-foreground: var(--foreground);
+	--sidebar-primary: var(--accent);
+	--sidebar-primary-foreground: var(--accent-foreground);
+	--sidebar-accent: oklch(23% 0 0);
+	--sidebar-accent-foreground: var(--foreground);
+	--sidebar-border: var(--border);
+	--sidebar-ring: var(--accent);
+}
+
+:root[data-theme="dark"] {
+	--background: oklch(15.5% 0 0);
+	--surface: oklch(17.5% 0 0);
+	--surface-raised: oklch(20% 0 0);
+	--surface-muted: oklch(22.5% 0 0);
+	--foreground: oklch(96% 0 0);
+	--text-secondary: oklch(76% 0 0);
+	--text-muted: oklch(60% 0 0);
+	--border: oklch(26% 0 0);
+	--border-subtle: oklch(22.5% 0 0);
+	--border-strong: oklch(38% 0 0);
+}
+
+html {
+	color-scheme: dark;
+}
+
+html,
+body,
+#root {
+	min-height: 100%;
+}
+
 body {
 	margin: 0;
-	min-height: 100vh;
 	background: var(--background);
 	color: var(--foreground);
 	font-family: var(--font-body, system-ui, sans-serif);
+	-webkit-font-smoothing: antialiased;
+	text-rendering: optimizeLegibility;
 }
 
-.shell {
-	max-width: 760px;
-	margin: 0 auto;
-	padding: 96px 24px;
+::selection {
+	background: var(--accent-subtle);
+	color: var(--foreground);
 }
 
-.eyebrow {
-	margin: 0 0 12px;
-	color: var(--text-muted);
-	font-size: 12px;
-	letter-spacing: 0.12em;
-	text-transform: uppercase;
-}
+/* ══ Stacked bars (Bencho, MIT) ═══════════════════════════
+   Source: https://bencho.dev. Bencho tokens are mapped on the
+   component root to Arc's ink, slab, UI font and pane edge. */
+.stb {
+	--fill-on: var(--foreground);
+	--fill-slab: var(--surface);
+	--font-ui: var(--font-body, system-ui, sans-serif);
+	--pane-edge: var(--border);
 
-h1 {
-	margin: 0 0 16px;
-	font-family: var(--font-display, system-ui, sans-serif);
-	font-size: clamp(32px, 5vw, 52px);
-	letter-spacing: -0.03em;
-}
-
-.lede {
-	max-width: 52ch;
-	margin: 0 0 32px;
-	color: var(--text-secondary);
-	line-height: 1.6;
-}
-
-.actions {
+	--stb-c1: color-mix(in srgb, var(--fill-on, #17181a) 100%, var(--fill-slab, #ffffff));
+	--stb-c2: color-mix(in srgb, var(--fill-on, #17181a) 78%, var(--fill-slab, #ffffff));
+	--stb-c3: color-mix(in srgb, var(--fill-on, #17181a) 60%, var(--fill-slab, #ffffff));
+	--stb-c4: color-mix(in srgb, var(--fill-on, #17181a) 44%, var(--fill-slab, #ffffff));
+	--stb-c5: color-mix(in srgb, var(--fill-on, #17181a) 32%, var(--fill-slab, #ffffff));
+	--stb-c6: color-mix(in srgb, var(--fill-on, #17181a) 22%, var(--fill-slab, #ffffff));
+	--stb-alert: color-mix(in srgb, var(--fill-on, #17181a) 100%, var(--fill-slab, #ffffff));
+	--stb-soft: color-mix(in srgb, var(--fill-on, #17181a) 72%, var(--fill-slab, #ffffff));
+	--stb-mute: color-mix(in srgb, var(--fill-on, #17181a) 52%, var(--fill-slab, #ffffff));
+	--stb-faint: color-mix(in srgb, var(--fill-on, #17181a) 32%, var(--fill-slab, #ffffff));
+	--stb-w6: color-mix(in srgb, var(--fill-on, #17181a) 6%, transparent);
+	--stb-w12: color-mix(in srgb, var(--fill-on, #17181a) 12%, transparent);
+	position: relative;
 	display: flex;
-	flex-wrap: wrap;
+	flex-direction: column;
+	gap: 16px;
+	padding: 16px;
+	box-sizing: border-box;
+	border-radius: 20px;
+	background: var(--fill-slab, #ffffff);
+	color: var(--fill-on, #17181a);
+	font-family: var(--font-ui);
+	font-size: 13px;
+	user-select: none;
+	-webkit-user-select: none;
+}
+
+.stb[data-colour="on"] {
+	--stb-c1: #9d7bf5;
+	--stb-c2: #5b8def;
+	--stb-c3: #9ab8db;
+	--stb-c4: #f2c46d;
+	--stb-c5: #74dcae;
+	--stb-c6: #e57bb8;
+	--stb-alert: #e5484d;
+}
+
+[data-stroke="on"] .stb {
+	box-shadow: 0 0 0 1px var(--pane-edge);
+}
+
+/* header: icon tile, title, Day / Week */
+.stb-head {
+	display: flex;
+	align-items: center;
 	gap: 12px;
+}
+
+.stb-titles {
+	flex: 1;
+	min-width: 0;
+}
+
+.stb-title {
+	font-size: 14px;
+	font-weight: 500;
+	letter-spacing: -0.01em;
+	line-height: 18px;
+}
+
+.stb-sub {
+	font-size: 12px;
+	color: var(--stb-mute);
+	line-height: 16px;
+	font-variant-numeric: tabular-nums;
+}
+
+.stb-seg-ctl {
+	position: relative;
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	padding: 2px;
+	border-radius: 10px;
+	background: var(--stb-w6);
+}
+
+.stb-thumb {
+	position: absolute;
+	top: 2px;
+	bottom: 2px;
+	left: 2px;
+	width: calc(50% - 2px);
+	border-radius: 8px;
+	background: var(--fill-slab, #ffffff);
+	transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.stb-seg-ctl[data-mode="Week"] .stb-thumb {
+	transform: translateX(100%);
+}
+
+.stb-tab {
+	position: relative;
+	appearance: none;
+	border: 0;
+	background: none;
+	padding: 0 10px;
+	height: 28px;
+	font: inherit;
+	font-size: 12px;
+	font-weight: 500;
+	color: var(--stb-mute);
+	cursor: pointer;
+	border-radius: 8px;
+	transition:
+		color 160ms ease,
+		scale 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.stb-tab[data-on] {
+	color: var(--fill-on, #17181a);
+}
+
+.stb-tab:hover:not([data-on]) {
+	color: var(--stb-soft);
+}
+
+.stb-tab:active {
+	scale: 0.96;
+}
+
+.stb-tab:focus-visible {
+	outline: 2px solid #2231dd;
+	outline-offset: 0;
+}
+
+/* the one figure */
+.stb-figure {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	margin-bottom: -4px;
+}
+
+.stb-num {
+	font-size: 30px;
+	font-weight: 500;
+	letter-spacing: -0.03em;
+	line-height: 32px;
+	font-variant-numeric: tabular-nums;
+}
+
+.stb-unit {
+	font-size: 13px;
+	color: var(--stb-mute);
+}
+
+/* Price flow's pop in: each character rises a touch from below, out
+   of a slight blur and from nothing, a hair past its mark — left to
+   right, 70ms apart */
+.stb-digit {
+	display: inline-block;
+}
+
+.stb-digit[data-pop] {
+	animation: stb-pop 500ms cubic-bezier(0.34, 1.45, 0.64, 1) both;
+	animation-delay: calc(var(--i, 0) * 70ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.stb-digit[data-pop] {
+		animation: none;
+	}
+}
+
+/* the plot: absolutely placed columns, each segment its own rounded box */
+.stb-plot {
+	position: relative;
+	width: 100%;
+	touch-action: none;
+	cursor: crosshair;
+}
+
+.stb-base {
+	position: absolute;
+	left: 0;
+	right: 0;
+	height: 1px;
+	background: var(--stb-w12);
+}
+
+.stb-col {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+}
+
+.stb-bar,
+.stb-esc {
+	position: absolute;
+	left: 0;
+	right: 0;
+	border-radius: var(--stb-r);
+	transition:
+		height 600ms cubic-bezier(0.22, 1, 0.36, 1) calc(var(--i) * 14ms),
+		bottom 600ms cubic-bezier(0.22, 1, 0.36, 1) calc(var(--i) * 14ms),
+		background-color 160ms ease;
+}
+
+.stb-bar {
+	background-color: var(--c);
+}
+
+.stb-esc {
+	background-color: var(--stb-alert);
+}
+
+/* Mono: escalated is full ink, hatched, so it never reads as Identity */
+.stb[data-colour="off"] .stb-esc {
+	background-image: repeating-linear-gradient(-45deg, transparent 0 1.5px, var(--fill-slab, #ffffff) 1.5px 3px);
+}
+
+/* scrubbing: the others step back by mixing toward the slab */
+.stb[data-scrub] .stb-col:not([data-on]) .stb-bar {
+	background-color: color-mix(in srgb, var(--c) 38%, var(--fill-slab, #ffffff));
+}
+
+.stb[data-scrub] .stb-col:not([data-on]) .stb-esc {
+	background-color: color-mix(in srgb, var(--stb-alert) 38%, var(--fill-slab, #ffffff));
+}
+
+.stb-ring {
+	position: absolute;
+	top: 0;
+	left: 0;
+	box-sizing: border-box;
+	border: 1.5px solid var(--stb-mute);
+	border-radius: var(--stb-rr);
+	pointer-events: none;
+	opacity: 0;
+	transition: opacity 160ms ease;
+}
+
+.stb[data-scrub] .stb-ring {
+	opacity: 1;
+}
+
+/* the tooltip: beside the column, gliding on a spring */
+.stb-tip {
+	position: absolute;
+	top: 0;
+	left: 0;
+	box-sizing: border-box;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 8px 10px;
+	border-radius: 10px;
+	background: var(--fill-slab, #ffffff);
+	/* filled like the card, parted from the bars by a soft grey hairline */
+	border: 1px solid color-mix(in srgb, var(--fill-on, #17181a) 10%, var(--fill-slab, #ffffff));
+	font-size: 12px;
+	line-height: 16px;
+	pointer-events: none;
+	opacity: 0;
+	transition: opacity 160ms ease;
+}
+
+.stb[data-scrub] .stb-tip {
+	opacity: 1;
+}
+
+.stb-tip-head,
+.stb-tip-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	white-space: nowrap;
+}
+
+.stb-tip-head {
+	justify-content: space-between;
+	color: var(--stb-mute);
+	margin-bottom: 2px;
+}
+
+.stb-tip b {
+	font-weight: 500;
+	font-variant-numeric: tabular-nums;
+	color: var(--fill-on, #17181a);
+}
+
+.stb-tip-row span {
+	flex: 1;
+	color: var(--stb-soft);
+}
+
+.stb-tip-row b {
+	font-weight: 400;
+}
+
+.stb-tip-row i {
+	flex: none;
+	width: 8px;
+	height: 8px;
+	border-radius: 2px;
+	background-color: var(--c);
+}
+
+.stb-tip-row[data-esc] i {
+	background-color: var(--stb-alert);
+}
+
+.stb[data-colour="off"] .stb-tip-row[data-esc] i {
+	background-image: repeating-linear-gradient(-45deg, transparent 0 1.5px, var(--fill-slab, #ffffff) 1.5px 3px);
+}
+
+/* one tiny footer: first and last date */
+.stb-axis {
+	display: flex;
+	justify-content: space-between;
+	margin-top: -8px;
+	font-size: 11px;
+	line-height: 14px;
+	color: var(--stb-faint);
+	font-variant-numeric: tabular-nums;
+}
+
+@keyframes stb-pop {
+	from {
+		transform: translateY(0.18em);
+		opacity: 0;
+		filter: blur(2px);
+	}
+	to {
+		transform: none;
+		opacity: 1;
+		filter: blur(0);
+	}
 }
