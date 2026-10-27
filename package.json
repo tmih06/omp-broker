@@ -30,7 +30,8 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vite-plus": "^1.4.0"
   },
   "engines": {
     "bun": ">=1.4.4"

@@ -25,6 +25,7 @@ updates:
         patterns:
           - "typescript"
           - "@types/bun"
+          - "vite-plus"
         update-types:
           - "minor"
           - "patch"
