@@ -5,7 +5,7 @@
   "type": "module",
   "description": "OpenAI- and Anthropic-compatible API gateway backed by omp subscription logins",
   "bin": {
-    "omp-gateway": "./src/cli.ts"
+    "omp-gateway": "./src/bin.ts"
   },
   "scripts": {
     "start": "bun run src/cli.ts serve",
@@ -17,7 +17,9 @@
     "test": "bun test",
     "logout": "bun run src/cli.ts logout",
     "providers": "bun run src/cli.ts providers",
-    "token": "bun run src/cli.ts token"
+    "token": "bun run src/cli.ts token",
+    "build": "bun run scripts/build.ts",
+    "serve:bin": "./dist/omp-gateway serve"
   },
   "dependencies": {
     "@oh-my-pi/pi-ai": "18.13.1",

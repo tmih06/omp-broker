@@ -130,6 +130,17 @@ By default the gateway uses the same credential store as omp: `~/.omp/agent/agen
 
 Auth accepts `Authorization: Bearer <token>` and Anthropic's `x-api-key: <token>`. CORS preflight is handled for browser clients.
 
+## Build a standalone server
+
+```bash
+bun run build
+# dist/omp-gateway — one executable, native addon embedded
+
+OMP_GATEWAY_TOKEN=change-me ./dist/omp-gateway serve --bind=0.0.0.0:4000
+```
+
+The first run extracts `pi_natives` into `$OMP_GATEWAY_HOME/natives/<version>/` (about 100 MB); later runs reuse it. Override the location with `PI_NATIVES_DIR`. The binary is large because it contains the full provider stack plus that addon. Build on the target OS/architecture — Bun does not cross-compile the N-API addon.
+
 ## Configuration
 
 | Variable | Default | Purpose |
