@@ -1,0 +1,62 @@
+version: 2
+
+updates:
+  # Runtime and development packages resolved through bun.lock.
+  # omp ships frequently, so its packages are grouped into one daily PR;
+  # major releases stay separate so a breaking bump is reviewed on its own.
+  - package-ecosystem: "bun"
+    directory: "/"
+    schedule:
+      interval: "daily"
+      time: "04:11"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    groups:
+      omp:
+        patterns:
+          - "@oh-my-pi/*"
+        update-types:
+          - "minor"
+          - "patch"
+      toolchain:
+        patterns:
+          - "typescript"
+          - "@types/bun"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Action pins in .github/workflows.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "daily"
+      time: "04:23"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+  # Base images in the Dockerfile (oven/bun and distroless).
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "daily"
+      time: "04:37"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "build"
+      include: "scope"
+    groups:
+      images:
+        patterns:
+          - "*"
