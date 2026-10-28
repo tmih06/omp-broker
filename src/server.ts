@@ -6,6 +6,7 @@ import { parseBind } from "@oh-my-pi/pi-ai/utils/parse-bind";
 import { DEFAULT_BIND, VERSION } from "./config";
 import { createModelCatalog, storageProviderAvailability, type ModelCatalog } from "./models";
 import type { RequestLog } from "./request-log";
+import { captureUsage, usageCost, type CapturedUsage } from "./usage-capture";
 
 export interface StartGatewayOptions {
 	storage: AuthStorage;
@@ -26,6 +27,32 @@ export interface StartGatewayOptions {
 function shouldLogRequest(method: string, pathname: string): boolean {
 	if (method === "OPTIONS") return false;
 	return pathname !== "/healthz" && pathname !== "/v1/logs" && pathname !== "/v1/logs/stats";
+}
+
+const MODEL_ROUTES = new Set(["/v1/chat/completions", "/v1/messages", "/v1/responses", "/v1/pi/stream"]);
+
+interface RequestMetadata {
+	model: string | null;
+	stream: boolean;
+}
+
+function isModelRoute(method: string, pathname: string): boolean {
+	return method === "POST" && MODEL_ROUTES.has(pathname);
+}
+
+/** Reads only the model and stream hint from a JSON request body; the router still owns the original. */
+async function readRequestMetadata(request: Request): Promise<RequestMetadata> {
+	try {
+		const declared = Number.parseInt(request.headers.get("content-length") ?? "", 10);
+		if (Number.isFinite(declared) && declared > 2_000_000) return { model: null, stream: false };
+		const body = (await request.clone().json()) as Record<string, unknown>;
+		return {
+			model: typeof body.model === "string" ? body.model : null,
+			stream: body.stream === true,
+		};
+	} catch {
+		return { model: null, stream: false };
+	}
 }
 
 export interface RunningGateway {
@@ -83,6 +110,7 @@ export async function startGateway(options: StartGatewayOptions): Promise<Runnin
 			const peer = server.requestIP(req)?.address ?? "unknown";
 			let response: Response;
 			let errorMessage: string | undefined;
+			let metadataPromise: Promise<RequestMetadata> | undefined;
 
 			const handle = async (): Promise<Response> => {
 				if (req.method === "OPTIONS") {
@@ -124,6 +152,10 @@ export async function startGateway(options: StartGatewayOptions): Promise<Runnin
 					return withCors(json(200, { object: "list", data: requestLog.list({ limit, before }) }), req);
 				}
 
+				if (requestLog && isModelRoute(req.method, url.pathname)) {
+					metadataPromise = readRequestMetadata(request);
+				}
+
 				return withCors(await router.route(request, peer), req);
 			};
 
@@ -135,17 +167,52 @@ export async function startGateway(options: StartGatewayOptions): Promise<Runnin
 				response = withCors(json(500, { error: "internal error" }), req);
 			}
 
-			// Streaming responses are recorded once the route returns; the body's
-			// duration is not tracked because it is consumed by the client.
+			const metadata = metadataPromise ? await metadataPromise : undefined;
+			const resolvedModel = metadata?.model ? catalog.resolve(metadata.model) : undefined;
+			const streaming = (response.headers.get("content-type") ?? "").includes("text/event-stream");
+			const durationMs = performance.now() - started;
+
+			// The body clone is created before the response is returned. JSON
+			// usage can be awaited; SSE usage updates the row when the stream ends.
+			let usage: CapturedUsage | null = null;
+			let usagePromise: Promise<CapturedUsage | null> | undefined;
+			if (requestLog && isModelRoute(req.method, url.pathname) && response.ok && response.body) {
+				if (streaming) usagePromise = captureUsage(response);
+				else usage = await captureUsage(response);
+			}
+			const costHeader = response.headers.get("x-litellm-response-cost");
+			const headerCost = costHeader === null ? null : Number(costHeader);
+			const costUsd =
+				headerCost !== null && Number.isFinite(headerCost)
+					? headerCost
+					: usage
+						? usageCost(resolvedModel, usage)
+						: null;
+
 			if (requestLog && shouldLogRequest(req.method, url.pathname)) {
-				requestLog.record({
+				const log = requestLog;
+				const id = log.record({
 					method: req.method,
 					path: url.pathname,
 					status: response.status,
-					durationMs: performance.now() - started,
+					durationMs,
 					client: peer,
 					error: errorMessage,
+					model: metadata?.model ?? null,
+					provider: resolvedModel?.provider ?? null,
+					requestId: response.headers.get("x-request-id"),
+					stream: streaming || metadata?.stream === true,
+					tokens: usage,
+					costUsd,
 				});
+				if (id !== undefined && usagePromise) {
+					void usagePromise.then(captured => {
+						if (!captured) return;
+						const streamCost =
+							headerCost !== null && Number.isFinite(headerCost) ? headerCost : usageCost(resolvedModel, captured);
+						log.attachUsage(id, captured, streamCost);
+					});
+				}
 			}
 			return response;
 		},

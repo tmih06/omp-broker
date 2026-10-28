@@ -2,6 +2,7 @@ import { chmodSync, mkdirSync } from "node:fs";
 import * as path from "node:path";
 import { Database, type Statement } from "bun:sqlite";
 import { brokerHome, resolveUserPath } from "./config";
+import type { CapturedUsage } from "./usage-capture";
 
 export type EndpointBucket = "chat" | "messages" | "responses" | "other";
 
@@ -14,6 +15,21 @@ export interface RequestLogEntry {
 	durationMs: number;
 	client: string | null;
 	error: string | null;
+	/** Model id requested by the client. */
+	model: string | null;
+	/** Provider resolved for that model, when the catalog knows it. */
+	provider: string | null;
+	/** Gateway-generated request id, shared with the response headers. */
+	requestId: string | null;
+	stream: boolean;
+	inputTokens: number | null;
+	outputTokens: number | null;
+	cacheReadTokens: number | null;
+	cacheWriteTokens: number | null;
+	reasoningTokens: number | null;
+	totalTokens: number | null;
+	/** Notional catalog cost in USD; null when the model or usage is unknown. */
+	costUsd: number | null;
 }
 
 export interface RequestLogInput {
@@ -24,6 +40,12 @@ export interface RequestLogInput {
 	durationMs: number;
 	client?: string | null;
 	error?: string | null;
+	model?: string | null;
+	provider?: string | null;
+	requestId?: string | null;
+	stream?: boolean;
+	tokens?: CapturedUsage | null;
+	costUsd?: number | null;
 }
 
 export interface RequestLogListOptions {
@@ -38,6 +60,15 @@ export interface RequestLogSummary {
 	successRate: number | null;
 	/** 95th percentile handling time in milliseconds. Null when no request was recorded. */
 	p95Ms: number | null;
+	tokens: {
+		input: number;
+		output: number;
+		cacheRead: number;
+		cacheWrite: number;
+		reasoning: number;
+		total: number;
+	};
+	costUsd: number;
 }
 
 export interface RequestLogSeriesPoint {
@@ -79,7 +110,8 @@ export interface RequestLogOptions {
 const DAY_MS = 86_400_000;
 const DEFAULT_MAX_ENTRIES = 10_000;
 
-const SQL_COLUMNS = "id, at, method, path, status, duration_ms, client, error";
+const SQL_COLUMNS =
+	"id, at, method, path, status, duration_ms, client, error, model, provider, request_id, stream, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, total_tokens, cost_usd";
 
 function clamp(value: number, min: number, max: number): number {
 	return Math.min(max, Math.max(min, value));
@@ -112,6 +144,7 @@ export class RequestLog {
 	readonly path: string;
 	readonly #db: Database;
 	readonly #insert: Statement;
+	readonly #updateUsage: Statement;
 	readonly #prune: Statement;
 	readonly #maxEntries: number;
 	#writes = 0;
@@ -138,12 +171,48 @@ export class RequestLog {
 				status INTEGER NOT NULL,
 				duration_ms INTEGER NOT NULL,
 				client TEXT,
-				error TEXT
+				error TEXT,
+				model TEXT,
+				provider TEXT,
+				request_id TEXT,
+				stream INTEGER NOT NULL DEFAULT 0,
+				input_tokens INTEGER,
+				output_tokens INTEGER,
+				cache_read_tokens INTEGER,
+				cache_write_tokens INTEGER,
+				reasoning_tokens INTEGER,
+				total_tokens INTEGER,
+				cost_usd REAL
 			);
 			CREATE INDEX IF NOT EXISTS requests_at ON requests (at);
 		`);
+		const columns = new Set(
+			(this.#db.query("PRAGMA table_info(requests)").all() as { name: string }[]).map(row => row.name),
+		);
+		const additions: readonly (readonly [string, string])[] = [
+			["model", "TEXT"],
+			["provider", "TEXT"],
+			["request_id", "TEXT"],
+			["stream", "INTEGER NOT NULL DEFAULT 0"],
+			["input_tokens", "INTEGER"],
+			["output_tokens", "INTEGER"],
+			["cache_read_tokens", "INTEGER"],
+			["cache_write_tokens", "INTEGER"],
+			["reasoning_tokens", "INTEGER"],
+			["total_tokens", "INTEGER"],
+			["cost_usd", "REAL"],
+		];
+		for (const [name, declaration] of additions) {
+			if (!columns.has(name)) this.#db.exec(`ALTER TABLE requests ADD COLUMN ${name} ${declaration}`);
+		}
 		this.#insert = this.#db.query(
-			"INSERT INTO requests (at, method, path, status, duration_ms, client, error) VALUES (?, ?, ?, ?, ?, ?, ?)",
+			`INSERT INTO requests (at, method, path, status, duration_ms, client, error, model, provider, request_id, stream,
+				input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, total_tokens, cost_usd)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		);
+		this.#updateUsage = this.#db.query(
+			`UPDATE requests SET input_tokens = ?, output_tokens = ?, cache_read_tokens = ?, cache_write_tokens = ?,
+				reasoning_tokens = ?, total_tokens = ?, cost_usd = ? WHERE id = ?`,
 		);
 		this.#prune = this.#db.query("DELETE FROM requests WHERE id <= (SELECT COALESCE(MAX(id), 0) - ? FROM requests)");
 	}
@@ -161,22 +230,57 @@ export class RequestLog {
 		return new RequestLog(dbPath, maxEntries);
 	}
 
-	/** Records one handled request. Old rows are pruned every hundred writes. */
-	record(entry: RequestLogInput): void {
-		if (this.#closed) return;
+	/** Records one handled request and returns its row id. Old rows are pruned every hundred writes. */
+	record(entry: RequestLogInput): number | undefined {
+		if (this.#closed) return undefined;
+		const tokens = entry.tokens;
 		try {
-			this.#insert.run(
-				entry.at ?? Date.now(),
-				entry.method.slice(0, 16),
-				entry.path.slice(0, 512),
-				entry.status,
-				Math.max(0, Math.round(entry.durationMs)),
-				entry.client?.slice(0, 128) ?? null,
-				entry.error?.slice(0, 500) ?? null,
+			const id = Number(
+				this.#insert.run(
+					entry.at ?? Date.now(),
+					entry.method.slice(0, 16),
+					entry.path.slice(0, 512),
+					entry.status,
+					Math.max(0, Math.round(entry.durationMs)),
+					entry.client?.slice(0, 128) ?? null,
+					entry.error?.slice(0, 500) ?? null,
+					entry.model?.slice(0, 200) ?? null,
+					entry.provider?.slice(0, 80) ?? null,
+					entry.requestId?.slice(0, 128) ?? null,
+					entry.stream ? 1 : 0,
+					tokens?.input ?? null,
+					tokens?.output ?? null,
+					tokens?.cacheRead ?? null,
+					tokens?.cacheWrite ?? null,
+					tokens?.reasoningTokens ?? null,
+					tokens?.totalTokens ?? null,
+					entry.costUsd ?? null,
+				).lastInsertRowid,
 			);
 			if (++this.#writes % 100 === 0) this.#prune.run(this.#maxEntries);
+			return id;
 		} catch (error) {
 			console.error("request log write failed:", error instanceof Error ? error.message : error);
+			return undefined;
+		}
+	}
+
+	/** Fills token and cost columns once a streamed response has produced usage. */
+	attachUsage(id: number, usage: CapturedUsage, costUsd?: number | null): void {
+		if (this.#closed) return;
+		try {
+			this.#updateUsage.run(
+				usage.input,
+				usage.output,
+				usage.cacheRead,
+				usage.cacheWrite,
+				usage.reasoningTokens ?? null,
+				usage.totalTokens,
+				costUsd ?? null,
+				id,
+			);
+		} catch (error) {
+			console.error("request log usage update failed:", error instanceof Error ? error.message : error);
 		}
 	}
 
@@ -198,6 +302,17 @@ export class RequestLog {
 			durationMs: Number(row.duration_ms),
 			client: row.client === null ? null : String(row.client),
 			error: row.error === null ? null : String(row.error),
+			model: row.model === null ? null : String(row.model),
+			provider: row.provider === null ? null : String(row.provider),
+			requestId: row.request_id === null ? null : String(row.request_id),
+			stream: Number(row.stream) === 1,
+			inputTokens: row.input_tokens === null ? null : Number(row.input_tokens),
+			outputTokens: row.output_tokens === null ? null : Number(row.output_tokens),
+			cacheReadTokens: row.cache_read_tokens === null ? null : Number(row.cache_read_tokens),
+			cacheWriteTokens: row.cache_write_tokens === null ? null : Number(row.cache_write_tokens),
+			reasoningTokens: row.reasoning_tokens === null ? null : Number(row.reasoning_tokens),
+			totalTokens: row.total_tokens === null ? null : Number(row.total_tokens),
+			costUsd: row.cost_usd === null ? null : Number(row.cost_usd),
 		}));
 	}
 
@@ -213,7 +328,14 @@ export class RequestLog {
 			return {
 				generatedAt: now,
 				days: range,
-				summary: { requests: 0, errors: 0, successRate: null, p95Ms: null },
+				summary: {
+					requests: 0,
+					errors: 0,
+					successRate: null,
+					p95Ms: null,
+					tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, total: 0 },
+					costUsd: 0,
+				},
 				series: [],
 				usage: [],
 				endpoints: [],
@@ -223,10 +345,27 @@ export class RequestLog {
 		const summaryRow = this.#db
 			.query(
 				`SELECT COUNT(*) AS requests,
-					COALESCE(SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END), 0) AS errors
+					COALESCE(SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END), 0) AS errors,
+					COALESCE(SUM(input_tokens), 0) AS input_tokens,
+					COALESCE(SUM(output_tokens), 0) AS output_tokens,
+					COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
+					COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
+					COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
+					COALESCE(SUM(total_tokens), 0) AS total_tokens,
+					COALESCE(SUM(cost_usd), 0) AS cost_usd
 				FROM requests WHERE at >= ?`,
 			)
-			.get(last24) as { requests: number; errors: number };
+			.get(last24) as {
+			requests: number;
+			errors: number;
+			input_tokens: number;
+			output_tokens: number;
+			cache_read_tokens: number;
+			cache_write_tokens: number;
+			reasoning_tokens: number;
+			total_tokens: number;
+			cost_usd: number;
+		};
 		const durations = this.#db
 			.query("SELECT duration_ms FROM requests WHERE at >= ? ORDER BY duration_ms")
 			.all(last24) as { duration_ms: number }[];
@@ -301,6 +440,15 @@ export class RequestLog {
 				errors,
 				successRate: total > 0 ? Math.round(((total - errors) / total) * 1000) / 10 : null,
 				p95Ms,
+				tokens: {
+					input: Number(summaryRow?.input_tokens ?? 0),
+					output: Number(summaryRow?.output_tokens ?? 0),
+					cacheRead: Number(summaryRow?.cache_read_tokens ?? 0),
+					cacheWrite: Number(summaryRow?.cache_write_tokens ?? 0),
+					reasoning: Number(summaryRow?.reasoning_tokens ?? 0),
+					total: Number(summaryRow?.total_tokens ?? 0),
+				},
+				costUsd: Number(summaryRow?.cost_usd ?? 0),
 			},
 			series,
 			usage,

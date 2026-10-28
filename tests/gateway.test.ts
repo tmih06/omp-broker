@@ -208,17 +208,43 @@ describe("gateway", () => {
 		const unauthorized = await fetch(`${gateway.url}/v1/logs`);
 		expect(unauthorized.status).toBe(401);
 
-		const list = await fetch(`${gateway.url}/v1/logs?limit=10`, {
+		const list = await fetch(`${gateway.url}/v1/logs?limit=50`, {
 			headers: { authorization: `Bearer ${TOKEN}` },
 		});
 		expect(list.status).toBe(200);
 		const body = (await list.json()) as {
 			object: string;
-			data: { method: string; path: string; status: number }[];
+			data: {
+				method: string;
+				path: string;
+				status: number;
+				model: string | null;
+				provider: string | null;
+				requestId: string | null;
+				stream: boolean;
+				inputTokens: number | null;
+				outputTokens: number | null;
+				cacheReadTokens: number | null;
+				totalTokens: number | null;
+			}[];
 		};
 		expect(body.object).toBe("list");
 		expect(body.data).toContainEqual(expect.objectContaining({ method: "GET", path: "/v1/models", status: 200 }));
 		expect(body.data.some(entry => entry.path === "/healthz")).toBe(false);
+		const chatLog = body.data.find(
+			entry => entry.path === "/v1/chat/completions" && entry.status === 200 && !entry.stream,
+		);
+		expect(chatLog).toMatchObject({
+			model: "deepseek-ai/deepseek-v4-flash",
+			provider: "aiand",
+			inputTokens: 5,
+			outputTokens: 1,
+			cacheReadTokens: 0,
+			totalTokens: 6,
+		});
+		expect(chatLog?.requestId).toBeTruthy();
+		const streamed = body.data.find(entry => entry.path === "/v1/chat/completions" && entry.stream);
+		expect(streamed).toMatchObject({ model: "deepseek-ai/deepseek-v4-flash", provider: "aiand" });
 
 		const stats = await fetch(`${gateway.url}/v1/logs/stats?days=7`, {
 			headers: { authorization: `Bearer ${TOKEN}` },
@@ -228,12 +254,13 @@ describe("gateway", () => {
 			days: number;
 			series: unknown[];
 			usage: unknown[];
-			summary: { requests: number };
+			summary: { requests: number; tokens: { total: number } };
 		};
 		expect(aggregate.days).toBe(7);
 		expect(aggregate.series).toHaveLength(7);
 		expect(aggregate.usage).toHaveLength(30);
 		expect(aggregate.summary.requests).toBeGreaterThan(0);
+		expect(aggregate.summary.tokens.total).toBeGreaterThan(0);
 
 		const badDays = await fetch(`${gateway.url}/v1/logs/stats?days=0`, {
 			headers: { authorization: `Bearer ${TOKEN}` },

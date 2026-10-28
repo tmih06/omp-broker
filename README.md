@@ -153,9 +153,11 @@ Auth accepts `Authorization: Bearer <token>` and Anthropic's `x-api-key: <token>
 
 Every handled request is recorded in `$OMP_BROKER_HOME/requests.db` (SQLite, WAL). Health probes, CORS preflights, and the log routes themselves are excluded so the history reflects gateway traffic. The last 10,000 rows are kept by default; the writer prunes old rows in the background.
 
-`GET /v1/logs` returns newest first with `limit` (1–200) and an exclusive `before` cursor. `GET /v1/logs/stats?days=7` returns a 24-hour summary, a daily series, 30-day endpoint usage, and per-route totals. Both routes require the gateway bearer token.
+`GET /v1/logs` returns newest first with `limit` (1–200) and an exclusive `before` cursor. `GET /v1/logs/stats?days=7` returns a 24-hour summary (including token totals and cost), a daily series, 30-day endpoint usage, and per-route totals. Both routes require the gateway bearer token.
 
-Entries contain the method, path, status, handling duration, client address, and error text. Request and response bodies, headers, and credentials are never stored. For streaming responses the duration stops when the response is returned to the client, not when the stream ends.
+Entries contain the method, path, status, handling duration, client address, error text, requested model, resolved provider, response request id, stream flag, and usage buckets: input (non-cached), output, cache read, cache write, reasoning, total tokens, plus the notional catalog cost. Request and response bodies, headers, and credentials are never stored.
+
+JSON responses have usage read before the row is written. SSE rows are written as soon as headers are ready and their token and cost columns are filled when the stream ends. OpenAI streams report usage only when the client requests `stream_options.include_usage`; Anthropic Messages and OpenAI Responses streams carry usage natively. For streaming responses the duration stops when the response is returned to the client, not when the stream ends.
 
 ## Build a standalone server
 
@@ -226,7 +228,7 @@ The token lives at `$OMP_BROKER_HOME/broker.token` (mode `0600`) and is generate
 - The Docker image runs non-root on distroless; only `/data` is writable.
 - `--no-auth` is refused on non-loopback binds unless `--allow-remote` is passed.
 - Tokens, refresh tokens, and API keys are never written to logs or responses; upstream auth is injected server-side.
-- Request logs store request metadata only (path, status, duration, client, error text), never headers, bodies, or credentials, and the log routes require the gateway bearer.
+- Request logs store request metadata (path, status, duration, client, model, provider, token buckets, cost), never headers, bodies, or credentials, and the log routes require the gateway bearer.
 - OAuth subscription endpoints are sanctioned for their providers' own clients. Check your provider's terms before sharing access with other users or workloads.
 
 ## Development
