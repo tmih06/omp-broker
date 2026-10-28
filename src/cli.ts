@@ -3,6 +3,7 @@ import { parseArgs } from "node:util";
 import type { Api, Model } from "@oh-my-pi/pi-ai";
 import type { OAuthLoginIdentity } from "@oh-my-pi/pi-ai/auth-storage";
 import type { OAuthAuthInfo, OAuthPrompt } from "@oh-my-pi/pi-ai/registry/oauth";
+import { ApiKeyStore, apiKeyStatus, type BudgetPeriod } from "./api-keys";
 import { DEFAULT_BIND, VERSION, bindHost, bindPort, isLoopbackBind, resolveToken, providerOrder } from "./config";
 import { credentialRows, listLoginProviders, loginProvider, removeProvider, storedProviders } from "./credentials";
 import { createModelCatalog, storageProviderAvailability } from "./models";
@@ -28,6 +29,13 @@ interface CliValues {
 	json?: boolean;
 	regenerate?: boolean;
 	provider?: string;
+	budget?: string;
+	period?: string;
+	"request-limit"?: string;
+	"allow-model"?: string[];
+	"block-model"?: string[];
+	"allow-ip"?: string[];
+	expires?: string;
 }
 
 function printHelp(): void {
@@ -43,13 +51,16 @@ COMMANDS
   status                Show stored credentials
   providers             Show providers available for login
   models                List models served by authenticated providers
-  token                 Print the gateway bearer token
+  token                 Print the admin bearer token
+  key create <name>     Create a virtual API key (shown once)
+  key list              List virtual API keys
+  key revoke <id>       Revoke a virtual API key
   healthcheck           Probe the local /healthz endpoint (container healthcheck)
 
 OPTIONS
   --bind <host:port>    Listen address (env: OMP_BROKER_BIND)
-  --token <token>       Use this bearer instead of the token file
-  --no-auth             Disable bearer auth (loopback binds only)
+  --token <token>       Use this admin bearer instead of the token file
+  --no-auth             Disable admin bearer auth; inference still needs a key
   --allow-remote        Permit --no-auth on a non-loopback bind
   --db <path>           Use an isolated SQLite credential store
   --omp                  Force the omp credential store (default)
@@ -60,6 +71,13 @@ OPTIONS
   --yes, -y             Skip the logout confirmation
   --json                Machine-readable output
   --regenerate          Token: replace the token file
+  --budget <usd>        Key create: spending budget (default unlimited)
+  --period <period>     Key create: daily, monthly (default), or total
+  --request-limit <n>   Key create: request cap for the period
+  --allow-model <glob>  Key create: allow a model/pattern (repeatable)
+  --block-model <glob>  Key create: block a model/pattern (repeatable)
+  --allow-ip <addr>     Key create: allow a client address (repeatable)
+  --expires <date>      Key create: ISO date or epoch milliseconds
   -h, --help            Show this help
   -v, --version         Show the version
 
@@ -69,15 +87,16 @@ ENDPOINTS
   POST /v1/responses           OpenAI Responses
   GET  /v1/models              Models with credentials
   GET  /v1/usage               Provider quota/usage
-  GET  /v1/logs                Recent request history
-  GET  /v1/logs/stats          Dashboard aggregates
+  GET  /v1/logs                Recent request history (admin)
+  GET  /v1/logs/stats          Dashboard aggregates (admin)
+  GET  /v1/keys                List virtual API keys (admin)
   GET  /healthz                Liveness
 
 EXAMPLES
   bun run login openai-codex
-  bun run login anthropic --manual
+  bun run key create laptop --budget 20 --allow-model 'anthropic/*'
   bun run start --bind=0.0.0.0:4000
-  curl http://127.0.0.1:4000/v1/models -H "Authorization: Bearer $(bun run token)"`);
+  curl http://127.0.0.1:4000/v1/models -H "Authorization: Bearer $OMP_KEY"`);
 }
 
 function stringValue(value: string | boolean | undefined): string | undefined {
@@ -138,6 +157,7 @@ async function commandServe(values: CliValues): Promise<void> {
 	}
 
 	const opened = await openStorage(storageOptions(values));
+	const apiKeys = ApiKeyStore.open();
 	let requestLog: RequestLog | undefined;
 	try {
 		requestLog = RequestLog.open();
@@ -158,6 +178,7 @@ async function commandServe(values: CliValues): Promise<void> {
 		bind,
 		providerOrder: providerOrder(),
 		requestLog,
+		apiKeys,
 	});
 	const providers = running.catalog.providers();
 	const modelCount = running.catalog.list().length;
@@ -168,10 +189,14 @@ async function commandServe(values: CliValues): Promise<void> {
 	console.log(`providers: ${providers.length > 0 ? providers.join(", ") : "(none — run `bun run login <provider>`)"}`);
 	console.log(`models:    ${modelCount}`);
 	console.log(`logs:      ${requestLog?.path ?? "disabled"}`);
+	console.log(`keys:      ${apiKeys.path}`);
 	console.log("endpoints: POST /v1/chat/completions, POST /v1/messages, POST /v1/responses");
 	console.log("           GET /v1/models, /v1/usage, /v1/logs, /v1/logs/stats, /healthz");
 
-	if (noAuth) console.warn("warning: the gateway accepts unauthenticated requests");
+	if (noAuth) console.warn("warning: admin auth disabled; inference still requires a virtual API key");
+	if (apiKeys.list().length === 0) {
+		console.warn("warning: no virtual API keys; create one with `bun run key create <name>`");
+	}
 	if (providers.length === 0) {
 		console.warn("warning: no credentials found; requests will fail until you log in");
 	}
@@ -191,11 +216,113 @@ async function commandServe(values: CliValues): Promise<void> {
 		clearInterval(poll);
 		await running.close().catch(error => console.error("gateway close failed:", error));
 		requestLog?.close();
+		apiKeys.close();
 		opened.storage.close();
 		process.exit(0);
 	};
 	process.once("SIGINT", () => void shutdown("SIGINT"));
 	process.once("SIGTERM", () => void shutdown("SIGTERM"));
+}
+
+function parseKeyNumber(value: string | undefined, label: string): number | undefined {
+	if (value === undefined) return undefined;
+	const parsed = Number(value);
+	if (!Number.isFinite(parsed)) throw new Error(`${label} must be a number`);
+	return parsed;
+}
+
+function parseKeyExpiry(value: string | undefined): number | undefined {
+	if (value === undefined) return undefined;
+	const numeric = Number(value);
+	if (Number.isFinite(numeric) && numeric > 0) return numeric;
+	const parsed = Date.parse(value);
+	if (!Number.isFinite(parsed)) throw new Error("--expires must be an ISO date or epoch milliseconds");
+	return parsed;
+}
+
+function formatTime(value: number | null): string {
+	return value ? new Date(value).toISOString().replace("T", " ").slice(0, 16) : "-";
+}
+
+async function commandKey(values: CliValues, positionals: string[]): Promise<void> {
+	const store = ApiKeyStore.open();
+	try {
+		const subcommand = positionals[1] ?? "list";
+		if (subcommand === "create") {
+			const name = positionals[2];
+			if (!name) throw new Error("Usage: omp-broker key create <name> [options]");
+			const created = store.create({
+				name,
+				budgetUsd: parseKeyNumber(values.budget, "--budget"),
+				budgetPeriod: values.period as BudgetPeriod | undefined,
+				requestLimit: parseKeyNumber(values["request-limit"], "--request-limit"),
+				allowedModels: values["allow-model"],
+				blockedModels: values["block-model"],
+				allowedIps: values["allow-ip"],
+				expiresAt: parseKeyExpiry(values.expires),
+			});
+			if (values.json) {
+				console.log(JSON.stringify({ ...created.apiKey, key: created.key }, null, 2));
+				return;
+			}
+			const key = created.apiKey;
+			console.log(`Created API key ${key.id} (${key.name})`);
+			console.log(`prefix:  ${key.keyPrefix}`);
+			console.log(
+				`budget:  ${key.budgetUsd === null ? "unlimited" : `$${key.budgetUsd.toFixed(2)} ${key.budgetPeriod}`}`,
+			);
+			console.log(`limit:   ${key.requestLimit ?? "unlimited"} requests per ${key.budgetPeriod}`);
+			console.log(`models:  ${key.allowedModels.length > 0 ? key.allowedModels.join(", ") : "all"}`);
+			console.log(`blocked: ${key.blockedModels.length > 0 ? key.blockedModels.join(", ") : "none"}`);
+			console.log(`ips:     ${key.allowedIps.length > 0 ? key.allowedIps.join(", ") : "any"}`);
+			console.log(`expires: ${key.expiresAt === null ? "never" : formatTime(key.expiresAt)}`);
+			console.log(`\n${created.key}\n`);
+			console.log("Store this secret now; it is not shown again.");
+			return;
+		}
+		if (subcommand === "list") {
+			const keys = store.list();
+			if (values.json) {
+				console.log(
+					JSON.stringify(
+						keys.map(key => ({ ...key, status: apiKeyStatus(key) })),
+						null,
+						2,
+					),
+				);
+				return;
+			}
+			if (keys.length === 0) {
+				console.log('No API keys. Create one with "bun run key create <name>".');
+				return;
+			}
+			printTable(
+				["ID", "NAME", "PREFIX", "STATUS", "BUDGET", "PERIOD", "LIMIT", "LAST USED"],
+				keys.map(key => [
+					String(key.id),
+					key.name,
+					key.keyPrefix,
+					apiKeyStatus(key),
+					key.budgetUsd === null ? "-" : `$${key.budgetUsd.toFixed(2)}`,
+					key.budgetPeriod,
+					key.requestLimit === null ? "-" : String(key.requestLimit),
+					formatTime(key.lastUsedAt),
+				]),
+			);
+			return;
+		}
+		if (subcommand === "revoke") {
+			const id = Number(positionals[2]);
+			if (!Number.isInteger(id) || id < 1) throw new Error("Usage: omp-broker key revoke <id>");
+			const key = store.revoke(id);
+			if (!key) throw new Error(`No API key with id ${id}`);
+			console.log(`Revoked API key ${key.id} (${key.name})`);
+			return;
+		}
+		throw new Error("Usage: omp-broker key <create|list|revoke> ...");
+	} finally {
+		store.close();
+	}
 }
 
 async function commandLogin(values: CliValues, positionals: string[]): Promise<void> {
@@ -429,6 +556,13 @@ async function main(): Promise<void> {
 			json: { type: "boolean" },
 			regenerate: { type: "boolean" },
 			provider: { type: "string" },
+			budget: { type: "string" },
+			period: { type: "string" },
+			"request-limit": { type: "string" },
+			"allow-model": { type: "string", multiple: true },
+			"block-model": { type: "string", multiple: true },
+			"allow-ip": { type: "string", multiple: true },
+			expires: { type: "string" },
 		},
 	});
 
@@ -463,6 +597,9 @@ async function main(): Promise<void> {
 			return;
 		case "token":
 			await commandToken(typed);
+			return;
+		case "key":
+			await commandKey(typed, positionals);
 			return;
 		case "healthcheck":
 			await commandHealthcheck(typed);

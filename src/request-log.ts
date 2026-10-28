@@ -30,6 +30,9 @@ export interface RequestLogEntry {
 	totalTokens: number | null;
 	/** Notional catalog cost in USD; null when the model or usage is unknown. */
 	costUsd: number | null;
+	/** Virtual API key that authorized the request. */
+	keyId: number | null;
+	keyName: string | null;
 }
 
 export interface RequestLogInput {
@@ -46,6 +49,8 @@ export interface RequestLogInput {
 	stream?: boolean;
 	tokens?: CapturedUsage | null;
 	costUsd?: number | null;
+	keyId?: number | null;
+	keyName?: string | null;
 }
 
 export interface RequestLogListOptions {
@@ -111,7 +116,7 @@ const DAY_MS = 86_400_000;
 const DEFAULT_MAX_ENTRIES = 10_000;
 
 const SQL_COLUMNS =
-	"id, at, method, path, status, duration_ms, client, error, model, provider, request_id, stream, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, total_tokens, cost_usd";
+	"id, at, method, path, status, duration_ms, client, error, model, provider, request_id, stream, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, total_tokens, cost_usd, key_id, key_name";
 
 function clamp(value: number, min: number, max: number): number {
 	return Math.min(max, Math.max(min, value));
@@ -182,7 +187,9 @@ export class RequestLog {
 				cache_write_tokens INTEGER,
 				reasoning_tokens INTEGER,
 				total_tokens INTEGER,
-				cost_usd REAL
+				cost_usd REAL,
+				key_id INTEGER,
+				key_name TEXT
 			);
 			CREATE INDEX IF NOT EXISTS requests_at ON requests (at);
 		`);
@@ -201,14 +208,18 @@ export class RequestLog {
 			["reasoning_tokens", "INTEGER"],
 			["total_tokens", "INTEGER"],
 			["cost_usd", "REAL"],
+			["key_id", "INTEGER"],
+			["key_name", "TEXT"],
 		];
 		for (const [name, declaration] of additions) {
 			if (!columns.has(name)) this.#db.exec(`ALTER TABLE requests ADD COLUMN ${name} ${declaration}`);
 		}
+		this.#db.exec("CREATE INDEX IF NOT EXISTS requests_key_at ON requests (key_id, at)");
 		this.#insert = this.#db.query(
 			`INSERT INTO requests (at, method, path, status, duration_ms, client, error, model, provider, request_id, stream,
-				input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, total_tokens, cost_usd)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, total_tokens, cost_usd,
+				key_id, key_name)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		);
 		this.#updateUsage = this.#db.query(
 			`UPDATE requests SET input_tokens = ?, output_tokens = ?, cache_read_tokens = ?, cache_write_tokens = ?,
@@ -255,6 +266,8 @@ export class RequestLog {
 					tokens?.reasoningTokens ?? null,
 					tokens?.totalTokens ?? null,
 					entry.costUsd ?? null,
+					entry.keyId ?? null,
+					entry.keyName?.slice(0, 120) ?? null,
 				).lastInsertRowid,
 			);
 			if (++this.#writes % 100 === 0) this.#prune.run(this.#maxEntries);
@@ -313,7 +326,21 @@ export class RequestLog {
 			reasoningTokens: row.reasoning_tokens === null ? null : Number(row.reasoning_tokens),
 			totalTokens: row.total_tokens === null ? null : Number(row.total_tokens),
 			costUsd: row.cost_usd === null ? null : Number(row.cost_usd),
+			keyId: row.key_id === null ? null : Number(row.key_id),
+			keyName: row.key_name === null ? null : String(row.key_name),
 		}));
+	}
+
+	/** Requests and cost attributed to one virtual key since a timestamp. */
+	usageForKey(keyId: number, since: number): { requests: number; costUsd: number } {
+		if (this.#closed) return { requests: 0, costUsd: 0 };
+		const row = this.#db
+			.query(
+				`SELECT COUNT(*) AS requests, COALESCE(SUM(cost_usd), 0) AS cost_usd
+				FROM requests WHERE key_id = ? AND at >= ?`,
+			)
+			.get(keyId, since) as { requests: number; cost_usd: number };
+		return { requests: row.requests, costUsd: row.cost_usd };
 	}
 
 	/**

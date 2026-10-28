@@ -1,8 +1,19 @@
 import { createAuthGatewayRouter } from "@oh-my-pi/pi-ai/auth-gateway";
-import { corsHeaders, hasMisplacedBearer, isAuthorized, json, withCors } from "@oh-my-pi/pi-ai/auth-gateway/http";
+import { corsHeaders, hasMisplacedBearer, json, withCors } from "@oh-my-pi/pi-ai/auth-gateway/http";
 import type { AuthStorage } from "@oh-my-pi/pi-ai/auth-storage";
 import type { Api, FetchImpl, Model } from "@oh-my-pi/pi-ai";
+import { modelKind } from "@oh-my-pi/pi-catalog/types";
 import { parseBind } from "@oh-my-pi/pi-ai/utils/parse-bind";
+import {
+	ApiKeyStore,
+	apiKeyStatus,
+	budgetWindowStart,
+	isIpAllowed,
+	isModelAllowed,
+	parseApiKeyInput,
+	parseApiKeyUpdate,
+	type ApiKey,
+} from "./api-keys";
 import { DEFAULT_BIND, VERSION } from "./config";
 import { createModelCatalog, storageProviderAvailability, type ModelCatalog } from "./models";
 import type { RequestLog } from "./request-log";
@@ -10,7 +21,7 @@ import { captureUsage, usageCost, type CapturedUsage } from "./usage-capture";
 
 export interface StartGatewayOptions {
 	storage: AuthStorage;
-	/** Accepted `Authorization: Bearer` or Anthropic `x-api-key` values. Empty disables auth. */
+	/** Admin `Authorization: Bearer` or Anthropic `x-api-key` values. Empty disables admin auth. */
 	bearerTokens?: string[];
 	bind?: string;
 	/** Override the bundled catalog (tests, custom deployments). */
@@ -20,6 +31,8 @@ export interface StartGatewayOptions {
 	fetch?: FetchImpl;
 	/** Request history. Omit to disable logging and the `/v1/logs` routes. */
 	requestLog?: RequestLog;
+	/** Virtual API keys. Without a store, inference cannot be authorized. */
+	apiKeys?: ApiKeyStore;
 	version?: string;
 }
 
@@ -29,7 +42,28 @@ function shouldLogRequest(method: string, pathname: string): boolean {
 	return pathname !== "/healthz" && pathname !== "/v1/logs" && pathname !== "/v1/logs/stats";
 }
 
-const MODEL_ROUTES = new Set(["/v1/chat/completions", "/v1/messages", "/v1/responses", "/v1/pi/stream"]);
+const MODEL_ROUTES: Record<string, true> = {
+	"/v1/chat/completions": true,
+	"/v1/messages": true,
+	"/v1/responses": true,
+	"/v1/pi/stream": true,
+	"/v1/images": true,
+	"/v1/images/generations": true,
+	"/v1/images/edits": true,
+	"/v1/audio/speech": true,
+	"/v1/audio/transcriptions": true,
+	"/v1/embeddings": true,
+	"/v1/rerank": true,
+	"/v1/videos": true,
+	"/v1/systemone": true,
+	"/alpha/decisions": true,
+};
+const ADMIN_PATHS: Record<string, true> = {
+	"/v1/logs": true,
+	"/v1/logs/stats": true,
+	"/v1/usage": true,
+	"/v1/credentials/check": true,
+};
 
 interface RequestMetadata {
 	model: string | null;
@@ -37,7 +71,51 @@ interface RequestMetadata {
 }
 
 function isModelRoute(method: string, pathname: string): boolean {
-	return method === "POST" && MODEL_ROUTES.has(pathname);
+	return method === "POST" && MODEL_ROUTES[pathname] === true;
+}
+
+function isAdminPath(pathname: string): boolean {
+	return ADMIN_PATHS[pathname] === true || pathname === "/v1/keys" || pathname.startsWith("/v1/keys/");
+}
+
+function presentedToken(req: Request): string | undefined {
+	const authorization = req.headers.get("authorization")?.trim();
+	if (authorization) {
+		const match = /^Bearer\s+(.+)$/i.exec(authorization);
+		return match?.[1]?.trim();
+	}
+	return req.headers.get("x-api-key")?.trim() || undefined;
+}
+
+function publicKey(key: ApiKey, requestLog?: RequestLog): Record<string, unknown> {
+	const usage = requestLog?.usageForKey(key.id, budgetWindowStart(key.budgetPeriod)) ?? null;
+	return { ...key, status: apiKeyStatus(key), usage };
+}
+
+/** The model list is filtered through the key's allow/block policy. */
+function modelsForKey(catalog: ModelCatalog, key: ApiKey): Record<string, unknown>[] {
+	const seen = new Set<string>();
+	const data: Record<string, unknown>[] = [];
+	for (const model of catalog.list()) {
+		if (!isModelAllowed(key, model.id, model.provider)) continue;
+		const id = `${model.provider}/${model.id}`;
+		if (seen.has(id)) continue;
+		seen.add(id);
+		const row: Record<string, unknown> = {
+			id,
+			object: "model",
+			owned_by: model.provider,
+			api: model.api,
+			display_name: model.name,
+			input_modalities: model.input,
+		};
+		if (modelKind(model) !== "chat") row.kind = modelKind(model);
+		if (model.contextWindow != null) row.context_length = model.contextWindow;
+		if (model.maxTokens != null) row.max_output_tokens = model.maxTokens;
+		if (model.supportsTools === false) row.supports_tools = false;
+		data.push(row);
+	}
+	return data;
 }
 
 /** Reads only the model and stream hint from a JSON request body; the router still owns the original. */
@@ -88,6 +166,7 @@ export async function startGateway(options: StartGatewayOptions): Promise<Runnin
 	const requireAuth = tokens.size > 0;
 	const version = options.version ?? VERSION;
 	const requestLog = options.requestLog;
+	const apiKeys = options.apiKeys;
 
 	const catalog = createModelCatalog({
 		models: options.models,
@@ -110,7 +189,8 @@ export async function startGateway(options: StartGatewayOptions): Promise<Runnin
 			const peer = server.requestIP(req)?.address ?? "unknown";
 			let response: Response;
 			let errorMessage: string | undefined;
-			let metadataPromise: Promise<RequestMetadata> | undefined;
+			let apiKey: ApiKey | undefined;
+			let metadata: RequestMetadata | undefined;
 
 			const handle = async (): Promise<Response> => {
 				if (req.method === "OPTIONS") {
@@ -120,12 +200,102 @@ export async function startGateway(options: StartGatewayOptions): Promise<Runnin
 					return withCors(json(200, { ok: true, version }), req);
 				}
 
-				const request = normalizeAuthHeader(req);
-				if (requireAuth && !isAuthorized(request, tokens)) {
-					return withCors(json(401, { error: "unauthorized" }), req);
+				if (url.search.includes("omp_sk_") || url.pathname.includes("omp_sk_")) {
+					return withCors(json(400, { error: "API key outside Authorization" }), req);
 				}
+
+				const request = normalizeAuthHeader(req);
 				if (hasMisplacedBearer(request, url, tokens)) {
 					return withCors(json(400, { error: "gateway token outside Authorization" }), req);
+				}
+
+				const token = presentedToken(req);
+				const admin = token !== undefined && tokens.has(token);
+				if (token && !admin && apiKeys) {
+					const candidate = apiKeys.lookup(token);
+					if (candidate) {
+						apiKey = candidate;
+						const status = apiKeyStatus(candidate);
+						if (status !== "active") {
+							return withCors(json(401, { error: `API key ${status}` }), req);
+						}
+						if (!isIpAllowed(candidate, peer)) {
+							return withCors(json(403, { error: "IP address not allowed for this API key" }), req);
+						}
+						apiKeys.touch(candidate.id);
+					} else if (requireAuth) {
+						return withCors(json(401, { error: "unauthorized" }), req);
+					}
+				}
+				if (requireAuth && !admin && !apiKey) {
+					return withCors(json(401, { error: "unauthorized" }), req);
+				}
+
+				const adminPath = isAdminPath(url.pathname);
+				const modelsPath = req.method === "GET" && url.pathname === "/v1/models";
+				const inference = isModelRoute(req.method, url.pathname);
+				if (adminPath && requireAuth && !admin) {
+					return withCors(json(403, { error: "administrator token required" }), req);
+				}
+				// Every non-admin route needs a virtual key; --no-auth only relaxes admin auth.
+				if (!adminPath && !modelsPath && !apiKey) {
+					return withCors(json(403, { error: "virtual API key required" }), req);
+				}
+
+				if (apiKey && !requestLog) {
+					return withCors(json(503, { error: "request logging is required for API keys" }), req);
+				}
+				if (apiKey && requestLog) {
+					const used = requestLog.usageForKey(apiKey.id, budgetWindowStart(apiKey.budgetPeriod));
+					if (apiKey.requestLimit !== null && used.requests >= apiKey.requestLimit) {
+						return withCors(json(429, { error: "API key request limit reached" }), req);
+					}
+					if (!modelsPath && apiKey.budgetUsd !== null && used.costUsd >= apiKey.budgetUsd) {
+						return withCors(json(402, { error: "API key budget exhausted" }), req);
+					}
+				}
+
+				if (url.pathname === "/v1/keys" || url.pathname.startsWith("/v1/keys/")) {
+					if (!apiKeys) return withCors(json(503, { error: "API key store not configured" }), req);
+					const match = /^\/v1\/keys(?:\/(\d+))?$/.exec(url.pathname);
+					if (!match) return withCors(json(404, { error: "not found" }), req);
+					const id = match[1] === undefined ? undefined : Number(match[1]);
+					if (id !== undefined && (!Number.isInteger(id) || id < 1)) {
+						return withCors(json(400, { error: "invalid API key id" }), req);
+					}
+					try {
+						if (id === undefined && req.method === "GET") {
+							return withCors(
+								json(200, { object: "list", data: apiKeys.list().map(key => publicKey(key, requestLog)) }),
+								req,
+							);
+						}
+						if (id === undefined && req.method === "POST") {
+							const created = apiKeys.create(parseApiKeyInput(await req.json()));
+							return withCors(json(201, { ...publicKey(created.apiKey, requestLog), key: created.key }), req);
+						}
+						if (id !== undefined && req.method === "GET") {
+							const key = apiKeys.get(id);
+							if (!key) return withCors(json(404, { error: "API key not found" }), req);
+							return withCors(json(200, publicKey(key, requestLog)), req);
+						}
+						if (id !== undefined && req.method === "PATCH") {
+							const key = apiKeys.update(id, parseApiKeyUpdate(await req.json()));
+							if (!key) return withCors(json(404, { error: "API key not found" }), req);
+							return withCors(json(200, publicKey(key, requestLog)), req);
+						}
+						if (id !== undefined && req.method === "DELETE") {
+							const key = apiKeys.revoke(id);
+							if (!key) return withCors(json(404, { error: "API key not found" }), req);
+							return withCors(json(200, publicKey(key, requestLog)), req);
+						}
+						return withCors(json(405, { error: "method not allowed" }), req);
+					} catch (error) {
+						return withCors(
+							json(400, { error: error instanceof Error ? error.message : "invalid API key request" }),
+							req,
+						);
+					}
 				}
 
 				if (req.method === "GET" && url.pathname === "/v1/logs/stats") {
@@ -152,8 +322,21 @@ export async function startGateway(options: StartGatewayOptions): Promise<Runnin
 					return withCors(json(200, { object: "list", data: requestLog.list({ limit, before }) }), req);
 				}
 
-				if (requestLog && isModelRoute(req.method, url.pathname)) {
-					metadataPromise = readRequestMetadata(request);
+				if (req.method === "GET" && url.pathname === "/v1/models" && apiKey) {
+					return withCors(json(200, { object: "list", data: modelsForKey(catalog, apiKey) }), req);
+				}
+
+				if (inference) {
+					metadata = await readRequestMetadata(request);
+					if (apiKey && (apiKey.allowedModels.length > 0 || apiKey.blockedModels.length > 0)) {
+						if (!metadata.model) {
+							return withCors(json(403, { error: "model is required to enforce this API key's model policy" }), req);
+						}
+						const resolved = catalog.resolve(metadata.model);
+						if (!isModelAllowed(apiKey, metadata.model, resolved?.provider)) {
+							return withCors(json(403, { error: "model is not allowed for this API key" }), req);
+						}
+					}
 				}
 
 				return withCors(await router.route(request, peer), req);
@@ -167,7 +350,6 @@ export async function startGateway(options: StartGatewayOptions): Promise<Runnin
 				response = withCors(json(500, { error: "internal error" }), req);
 			}
 
-			const metadata = metadataPromise ? await metadataPromise : undefined;
 			const resolvedModel = metadata?.model ? catalog.resolve(metadata.model) : undefined;
 			const streaming = (response.headers.get("content-type") ?? "").includes("text/event-stream");
 			const durationMs = performance.now() - started;
@@ -204,6 +386,8 @@ export async function startGateway(options: StartGatewayOptions): Promise<Runnin
 					stream: streaming || metadata?.stream === true,
 					tokens: usage,
 					costUsd,
+					keyId: apiKey?.id ?? null,
+					keyName: apiKey?.name ?? null,
 				});
 				if (id !== undefined && usagePromise) {
 					void usagePromise.then(captured => {

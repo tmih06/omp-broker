@@ -22,6 +22,7 @@
     "logout": "bun run src/cli.ts logout",
     "providers": "bun run src/cli.ts providers",
     "token": "bun run src/cli.ts token",
+    "key": "bun run src/cli.ts key",
     "build": "bun run scripts/build.ts",
     "serve:bin": "./dist/omp-broker serve",
     "docker:build": "docker build -t omp-broker:latest .",
