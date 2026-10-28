@@ -5,14 +5,9 @@ export interface PreviewDay {
 	at: number;
 	requests: number;
 	errors: number;
+	/** p95 round-trip latency for the day. */
+	latencyMs: number;
 	counts: { chat: number; messages: number; responses: number; other: number };
-}
-
-export interface PreviewMetric {
-	label: string;
-	value: number;
-	context: string;
-	change: string;
 }
 
 export interface PreviewRequest {
@@ -45,39 +40,9 @@ export function buildPreviewDays(count = 30): PreviewDay[] {
 		};
 		const requests = counts.chat + counts.messages + counts.responses + counts.other;
 		const errors = Math.max(1, Math.round(requests * (0.008 + (index % 5 === 0 ? 0.004 : 0))));
-		return { at, requests, errors, counts };
+		const latencyMs = Math.round(356 + wave * 62 + (index % 4) * 11 + (weekend < 1 ? 54 : 0));
+		return { at, requests, errors, latencyMs, counts };
 	});
-}
-
-export function buildMetrics(days: PreviewDay[]): PreviewMetric[] {
-	const today = days.at(-1);
-	const previous = days.at(-2);
-	if (!today || !previous) return [];
-	const success = (1 - today.errors / today.requests) * 100;
-	const previousSuccess = (1 - previous.errors / previous.requests) * 100;
-	const change = ((today.requests - previous.requests) / previous.requests) * 100;
-	const successChange = success - previousSuccess;
-	return [
-		{
-			label: "Requests",
-			value: today.requests,
-			context: "Last 24 hours",
-			change: Math.abs(change) < 0.05 ? "0.0%" : `${change > 0 ? "+" : ""}${change.toFixed(1)}%`,
-		},
-		{
-			label: "Success rate",
-			value: Number(success.toFixed(1)),
-			context: "Last 24 hours",
-			change:
-				Math.abs(successChange) < 0.05 ? "0.0 pp" : `${successChange > 0 ? "+" : ""}${successChange.toFixed(1)} pp`,
-		},
-		{
-			label: "p95 latency",
-			value: 412,
-			context: "Time to response",
-			change: "8.1% faster",
-		},
-	];
 }
 
 /** Sample request rows for the dashboard table; deterministic apart from their timestamps. */

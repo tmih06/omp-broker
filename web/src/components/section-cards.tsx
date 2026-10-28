@@ -1,91 +1,134 @@
-import { IconActivity, IconServer, IconTrendingDown, IconTrendingUp, type Icon } from "@tabler/icons-react";
+import { useMemo } from "react";
 
-import { Badge } from "@/components/ui/badge";
-import { Card, CardAction, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { buildMetrics, buildPreviewDays } from "@/lib/preview-data";
+import { Panel } from "@/components/instrument/Panel";
+import { SparkBars, type SparkDatum } from "@/components/instrument/SparkBars";
+import { buildPreviewDays } from "@/lib/preview-data";
 
-interface Stat {
-	title: string;
-	value: string;
-	change: string;
-	footer: string;
-	note: string;
-	icon: Icon;
+const PROVIDERS = [
+	{ name: "Anthropic", models: 14, shade: "var(--series-1)" },
+	{ name: "Codex", models: 9, shade: "var(--series-2)" },
+	{ name: "Copilot", models: 6, shade: "var(--series-5)" },
+] as const;
+
+function signed(value: number, suffix: string) {
+	if (Math.abs(value) < 0.05) return `0.0${suffix}`;
+	return `${value > 0 ? "+" : "−"}${Math.abs(value).toFixed(1)}${suffix}`;
 }
 
 export function SectionCards() {
-	const days = buildPreviewDays(30);
-	const metrics = buildMetrics(days);
-	const requests = metrics[0];
-	const success = metrics[1];
-	const latency = metrics[2];
+	const days = useMemo(() => buildPreviewDays(31), []);
+	const recent = days.slice(-14);
+	const today = days.at(-1);
+	const yesterday = days.at(-2);
 
-	const stats: Stat[] = [
-		{
-			title: "Requests",
-			value: requests?.value.toLocaleString("en-US") ?? "—",
-			change: requests?.change ?? "—",
-			footer: "Traffic handled by the gateway",
-			note: "Last 24 hours",
-			icon: IconTrendingUp,
-		},
-		{
-			title: "Success rate",
-			value: success ? `${success.value}%` : "—",
-			change: success?.change ?? "—",
-			footer: "Successful responses",
-			note: "Last 24 hours",
-			icon: IconTrendingUp,
-		},
-		{
-			title: "p95 latency",
-			value: latency ? `${latency.value} ms` : "—",
-			change: "8.1% faster",
-			footer: "Time to response",
-			note: "Across all providers",
-			icon: IconActivity,
-		},
-		{
-			title: "Providers",
-			value: "3",
-			change: "Stable",
-			footer: "Anthropic · Codex · Copilot",
-			note: "Authenticated providers",
-			icon: IconServer,
-		},
-	];
+	const requests = today?.requests ?? 0;
+	const success = today ? 100 - (today.errors / today.requests) * 100 : 0;
+	const previousSuccess = yesterday ? 100 - (yesterday.errors / yesterday.requests) * 100 : success;
+	const previousRequests = yesterday?.requests ?? requests;
+	const latency = today?.latencyMs ?? 0;
+	const previousLatency = yesterday?.latencyMs ?? latency;
+	const requestChange = previousRequests ? ((requests - previousRequests) / previousRequests) * 100 : 0;
+	const latencyChange = previousLatency ? ((latency - previousLatency) / previousLatency) * 100 : 0;
+
+	const requestSpark: SparkDatum[] = recent.map(day => ({
+		values: [day.counts.chat, day.counts.messages, day.counts.responses, day.counts.other],
+		error: day.errors,
+	}));
+	const successSpark: SparkDatum[] = recent.map(day => ({
+		values: [day.requests - day.errors],
+		error: day.errors,
+	}));
+	const latencySpark: SparkDatum[] = recent.map(day => ({ values: [day.latencyMs], error: 0 }));
+	const providerTotal = PROVIDERS.reduce((sum, provider) => sum + provider.models, 0);
 
 	return (
-		<div className="grid grid-cols-1 gap-4 px-4 *:data-[slot=card]:bg-gradient-to-t *:data-[slot=card]:from-primary/5 *:data-[slot=card]:to-card *:data-[slot=card]:shadow-xs lg:px-6 @xl/main:grid-cols-2 @5xl/main:grid-cols-4 dark:*:data-[slot=card]:bg-card">
-			{stats.map(stat => {
-				const Trend = stat.change.startsWith("+")
-					? IconTrendingUp
-					: stat.change.startsWith("-")
-						? IconTrendingDown
-						: stat.icon;
-				return (
-					<Card key={stat.title} className="@container/card">
-						<CardHeader>
-							<CardDescription>{stat.title}</CardDescription>
-							<CardTitle className="whitespace-nowrap text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
-								{stat.value}
-							</CardTitle>
-							<CardAction>
-								<Badge variant="outline">
-									<Trend />
-									{stat.change}
-								</Badge>
-							</CardAction>
-						</CardHeader>
-						<CardFooter className="flex-col items-start gap-1.5 text-sm">
-							<div className="line-clamp-1 flex gap-2 font-medium">
-								{stat.footer} <Trend className="size-4" />
-							</div>
-							<div className="text-muted-foreground">{stat.note}</div>
-						</CardFooter>
-					</Card>
-				);
-			})}
+		<div className="metric-grid">
+			<Panel index={0} className="metric-panel">
+				<div className="metric-head">
+					<h2 className="metric-title">Requests</h2>
+					<div className="inst-kicker">01 / 24H</div>
+				</div>
+				<div className="metric-figure">
+					<span className="metric-num">{requests.toLocaleString("en-US")}</span>
+					<span className="metric-unit">requests</span>
+				</div>
+				<div className="metric-meta">
+					<span className="metric-delta">
+						<b>{signed(requestChange, "%")}</b> vs yesterday
+					</span>
+					<span>14D</span>
+				</div>
+				<SparkBars data={requestSpark} label="Requests by source, last 14 days, with errors below the baseline" />
+			</Panel>
+
+			<Panel index={1} className="metric-panel">
+				<div className="metric-head">
+					<h2 className="metric-title">Success rate</h2>
+					<div className="inst-kicker">02 / 24H</div>
+				</div>
+				<div className="metric-figure">
+					<span className="metric-num">{success.toFixed(1)}</span>
+					<span className="metric-unit">%</span>
+				</div>
+				<div className="metric-meta">
+					<span className="metric-delta">
+						<b>{signed(success - previousSuccess, " pp")}</b> vs yesterday
+					</span>
+					<span>14D</span>
+				</div>
+				<SparkBars
+					data={successSpark}
+					tone={4}
+					label="Successful requests, last 14 days, with errors below the baseline"
+				/>
+			</Panel>
+
+			<Panel index={2} className="metric-panel">
+				<div className="metric-head">
+					<h2 className="metric-title">p95 latency</h2>
+					<div className="inst-kicker">03 / 24H</div>
+				</div>
+				<div className="metric-figure">
+					<span className="metric-num">{latency.toLocaleString("en-US")}</span>
+					<span className="metric-unit">ms</span>
+				</div>
+				<div className="metric-meta">
+					<span className="metric-delta">
+						<b>{signed(latencyChange, "%")}</b> vs yesterday
+					</span>
+					<span>14D</span>
+				</div>
+				<SparkBars data={latencySpark} tone={3} label="p95 latency, last 14 days" />
+			</Panel>
+
+			<Panel index={3} className="metric-panel">
+				<div className="metric-head">
+					<h2 className="metric-title">Providers</h2>
+					<div className="inst-kicker">04 / AUTH</div>
+				</div>
+				<div className="metric-figure">
+					<span className="metric-num">{PROVIDERS.length}</span>
+					<span className="metric-unit">authenticated</span>
+				</div>
+				<div className="metric-meta">
+					<span className="metric-delta">
+						<b>Stable</b> catalog
+					</span>
+					<span>{providerTotal} models</span>
+				</div>
+				<div>
+					<div className="provider-strip" aria-hidden>
+						{PROVIDERS.map(provider => (
+							<span key={provider.name} style={{ flexGrow: provider.models, background: provider.shade }} />
+						))}
+					</div>
+					<div className="provider-labels">
+						{PROVIDERS.map(provider => (
+							<span key={provider.name}>{provider.name}</span>
+						))}
+					</div>
+				</div>
+			</Panel>
 		</div>
 	);
 }

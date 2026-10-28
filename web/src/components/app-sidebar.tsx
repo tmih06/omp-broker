@@ -1,7 +1,5 @@
 import type { ComponentProps } from "react";
-import { IconDashboard, IconInnerShadowTop } from "@tabler/icons-react";
 
-import { useGatewayHealth } from "@/hooks/use-gateway-health";
 import {
 	Sidebar,
 	SidebarContent,
@@ -14,35 +12,44 @@ import {
 	SidebarMenuButton,
 	SidebarMenuItem,
 } from "@/components/ui/sidebar";
+import { useGatewayHealth } from "@/hooks/use-gateway-health";
 
 export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
 	const health = useGatewayHealth();
 	const status = health === "online" ? "Connected" : health === "offline" ? "Not running" : "Checking";
 
 	return (
-		<Sidebar collapsible="icon" {...props}>
-			<SidebarHeader>
-				<SidebarMenu>
-					<SidebarMenuItem>
-						<SidebarMenuButton asChild className="data-[slot=sidebar-menu-button]:p-1.5!">
-							<a href="/">
-								<IconInnerShadowTop className="size-5!" />
-								<span className="text-base font-semibold group-data-[collapsible=icon]:hidden">omp-broker</span>
-							</a>
-						</SidebarMenuButton>
-					</SidebarMenuItem>
-				</SidebarMenu>
+		<Sidebar collapsible="icon" variant="floating" {...props}>
+			<SidebarHeader className="rail-head">
+				<a className="rail-brand" href="/" aria-label="omp-broker dashboard">
+					<span className="rail-mark" aria-hidden>
+						<i />
+						<i />
+						<i />
+						<i />
+					</span>
+					<span className="rail-brand-text">
+						<span className="rail-name">omp-broker</span>
+						<span className="rail-kind">gateway console</span>
+					</span>
+				</a>
 			</SidebarHeader>
+
 			<SidebarContent>
-				<SidebarGroup>
-					<SidebarGroupLabel>Workspace</SidebarGroupLabel>
+				<SidebarGroup className="rail-group">
+					<SidebarGroupLabel className="rail-label">Workspace</SidebarGroupLabel>
 					<SidebarGroupContent>
 						<SidebarMenu>
 							<SidebarMenuItem>
 								<SidebarMenuButton asChild isActive tooltip="Dashboard">
-									<a href="/">
-										<IconDashboard />
+									<a className="rail-nav" href="/">
+										<span className="nav-mark" aria-hidden>
+											<i />
+											<i />
+											<i />
+										</span>
 										<span>Dashboard</span>
+										<span className="rail-index">01</span>
 									</a>
 								</SidebarMenuButton>
 							</SidebarMenuItem>
@@ -50,27 +57,16 @@ export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
 					</SidebarGroupContent>
 				</SidebarGroup>
 			</SidebarContent>
-			<SidebarFooter>
-				<SidebarMenu>
-					<SidebarMenuItem>
-						<SidebarMenuButton size="lg" className="hover:bg-transparent group-data-[collapsible=icon]:justify-center">
-							<span
-								className={`size-2 shrink-0 rounded-full ${
-									health === "online"
-										? "bg-emerald-500"
-										: health === "offline"
-											? "bg-destructive"
-											: "bg-muted-foreground"
-								}`}
-							/>
-							<div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
-								<span className="truncate font-medium">Gateway</span>
-								<span className="truncate text-xs text-muted-foreground">{status}</span>
-							</div>
-							<span className="text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">v0.2.0</span>
-						</SidebarMenuButton>
-					</SidebarMenuItem>
-				</SidebarMenu>
+
+			<SidebarFooter className="rail-foot">
+				<div className="rail-status" title={`${status} · v0.2.0`}>
+					<span className="rail-status-mark" data-health={health} aria-hidden />
+					<span className="rail-status-text">
+						<span className="rail-status-name">Gateway</span>
+						<span className="rail-status-value">{status}</span>
+					</span>
+					<span className="rail-version">v0.2.0</span>
+				</div>
 			</SidebarFooter>
 		</Sidebar>
 	);

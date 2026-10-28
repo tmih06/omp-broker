@@ -1,30 +1,25 @@
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { gatewayUrl } from "@/hooks/use-gateway-health";
 
 export function SiteHeader() {
 	return (
-		<header className="flex h-(--header-height) shrink-0 items-center gap-2 border-b transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-(--header-height)">
-			<div className="flex w-full items-center gap-1 px-4 lg:gap-2 lg:px-6">
-				<SidebarTrigger className="-ml-1" />
-				<Separator orientation="vertical" className="mx-2 data-[orientation=vertical]:h-4" />
-				<h1 className="text-base font-medium">Dashboard</h1>
-				<Badge variant="outline" className="text-muted-foreground">
-					Preview data
-				</Badge>
-				<div className="ml-auto flex items-center gap-2">
-					<Button variant="ghost" asChild size="sm" className="hidden sm:flex">
-						<a
-							href="https://github.com/tmih06/omp-broker"
-							rel="noopener noreferrer"
-							target="_blank"
-							className="dark:text-foreground"
-						>
-							GitHub
-						</a>
-					</Button>
-				</div>
+		<header className="inst-header">
+			<SidebarTrigger className="inst-icon-btn" />
+			<div>
+				<h1 className="inst-page-title">Dashboard</h1>
+				<div className="inst-page-sub">gateway telemetry</div>
+			</div>
+			<div className="inst-header-right">
+				<span className="inst-tag">Preview data</span>
+				<span className="inst-address">{gatewayUrl.replace(/^https?:\/\//, "")}</span>
+				<a
+					className="inst-source"
+					href="https://github.com/tmih06/omp-broker"
+					rel="noopener noreferrer"
+					target="_blank"
+				>
+					Source ↗
+				</a>
 			</div>
 		</header>
 	);

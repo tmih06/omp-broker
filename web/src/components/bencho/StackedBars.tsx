@@ -238,7 +238,7 @@ export function StackedBars({
 		>
 			<div className="stb-head">
 				<div className="stb-titles">
-					<div className="stb-title">{title}</div>
+					<h2 className="stb-title">{title}</h2>
 					<div className="stb-sub">
 						Last {n} {mode === "Day" ? "days" : "weeks"}
 					</div>
