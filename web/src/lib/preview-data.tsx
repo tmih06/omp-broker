@@ -1,16 +1,4 @@
-import { CircleCheck, KeyRound, RefreshCw, TriangleAlert, Waypoints } from "lucide-react";
-import type { LineChartDatum } from "@/components/arc/line-chart/line-chart";
-import type { TimelineEvent } from "@/components/arc/timeline/timeline";
-import type { MetricCardProps } from "@/components/arc/metric-card/metric-card";
-
 const DAY_MS = 86_400_000;
-const dayLong = new Intl.DateTimeFormat("en-US", {
-	weekday: "short",
-	month: "short",
-	day: "numeric",
-	timeZone: "UTC",
-});
-const dayShort = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 
 export interface PreviewDay {
 	/** UTC midnight for the day. */
@@ -20,14 +8,30 @@ export interface PreviewDay {
 	counts: { chat: number; messages: number; responses: number; other: number };
 }
 
-function utcDay(ms: number): number {
-	const date = new Date(ms);
-	return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+export interface PreviewMetric {
+	label: string;
+	value: number;
+	context: string;
+	change: string;
+}
+
+export interface PreviewRequest {
+	at: number;
+	method: string;
+	path: string;
+	status: number;
+	model: string | null;
+	provider: string | null;
+	keyName: string;
+	tokens: number;
+	latencyMs: number;
+	costUsd: number;
 }
 
 /** Deterministic sample traffic so the shell stays stable across reloads. */
 export function buildPreviewDays(count = 30): PreviewDay[] {
-	const today = utcDay(Date.now());
+	const now = new Date();
+	const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
 	return Array.from({ length: count }, (_, index) => {
 		const at = today - (count - 1 - index) * DAY_MS;
 		const weekday = new Date(at).getUTCDay();
@@ -45,17 +49,7 @@ export function buildPreviewDays(count = 30): PreviewDay[] {
 	});
 }
 
-export function toLineChartData(days: PreviewDay[], count: number): LineChartDatum[] {
-	const slice = days.slice(-count);
-	return slice.map((day, index) => ({
-		key: new Date(day.at).toISOString(),
-		label: dayLong.format(day.at),
-		axisLabel: count <= 7 || index % 5 === 0 ? dayShort.format(day.at) : undefined,
-		values: { requests: day.requests },
-	}));
-}
-
-export function buildMetrics(days: PreviewDay[]): MetricCardProps[] {
+export function buildMetrics(days: PreviewDay[]): PreviewMetric[] {
 	const today = days.at(-1);
 	const previous = days.at(-2);
 	if (!today || !previous) return [];
@@ -63,71 +57,128 @@ export function buildMetrics(days: PreviewDay[]): MetricCardProps[] {
 	const previousSuccess = (1 - previous.errors / previous.requests) * 100;
 	const change = ((today.requests - previous.requests) / previous.requests) * 100;
 	const successChange = success - previousSuccess;
-	const signed = (value: number, unit: string) =>
-		Math.abs(value) < 0.05 ? `0.0${unit}` : `${value > 0 ? "+" : ""}${value.toFixed(1)}${unit}`;
-	const rounded = (value: number) => Number(value.toFixed(1));
 	return [
 		{
 			label: "Requests",
 			value: today.requests,
 			context: "Last 24 hours",
-			change: signed(change, "%"),
+			change: Math.abs(change) < 0.05 ? "0.0%" : `${change > 0 ? "+" : ""}${change.toFixed(1)}%`,
 		},
 		{
 			label: "Success rate",
-			value: rounded(success),
-			suffix: "%",
+			value: Number(success.toFixed(1)),
 			context: "Last 24 hours",
-			change: signed(successChange, " pp"),
+			change:
+				Math.abs(successChange) < 0.05 ? "0.0 pp" : `${successChange > 0 ? "+" : ""}${successChange.toFixed(1)} pp`,
 		},
 		{
 			label: "p95 latency",
 			value: 412,
-			suffix: "ms",
 			context: "Time to response",
 			change: "8.1% faster",
 		},
 	];
 }
 
-export function buildPreviewEvents(now: number): TimelineEvent[] {
+/** Sample request rows for the dashboard table; deterministic apart from their timestamps. */
+export function buildPreviewRequests(now = Date.now()): PreviewRequest[] {
+	const minute = 60_000;
 	return [
 		{
-			id: "health",
-			at: now - 2 * 60_000,
-			icon: <CircleCheck size={14} />,
-			title: "Health check passed",
-			meta: "127.0.0.1:4000 · 12 ms",
-			tone: "success",
+			at: now - 2 * minute,
+			method: "POST",
+			path: "/v1/chat/completions",
+			status: 200,
+			model: "claude-sonnet-4-5",
+			provider: "anthropic",
+			keyName: "laptop",
+			tokens: 1842,
+			latencyMs: 1210,
+			costUsd: 0.0132,
 		},
 		{
-			id: "route",
-			at: now - 14 * 60_000,
-			icon: <Waypoints size={14} />,
-			title: "Chat completion routed to anthropic",
-			meta: "claude-sonnet-4-5 · 1.2 s",
+			at: now - 7 * minute,
+			method: "POST",
+			path: "/v1/messages",
+			status: 200,
+			model: "gpt-5.6-sol",
+			provider: "openai-codex",
+			keyName: "desktop",
+			tokens: 2964,
+			latencyMs: 842,
+			costUsd: 0.0218,
 		},
 		{
-			id: "credential",
-			at: now - 38 * 60_000,
-			icon: <KeyRound size={14} />,
-			title: "Credential refreshed for openai-codex",
-			meta: "Expires in 9 days",
+			at: now - 12 * minute,
+			method: "POST",
+			path: "/v1/responses",
+			status: 200,
+			model: "claude-sonnet-4.5",
+			provider: "github-copilot",
+			keyName: "ci",
+			tokens: 1210,
+			latencyMs: 640,
+			costUsd: 0,
 		},
 		{
-			id: "copilot",
-			at: now - 62 * 60_000,
-			icon: <TriangleAlert size={14} />,
-			title: "GitHub Copilot model unavailable",
-			meta: "Enable it in the Copilot picker",
-			tone: "danger",
+			at: now - 18 * minute,
+			method: "POST",
+			path: "/v1/chat/completions",
+			status: 402,
+			model: "claude-sonnet-4-5",
+			provider: "anthropic",
+			keyName: "trial",
+			tokens: 0,
+			latencyMs: 3,
+			costUsd: 0,
 		},
 		{
-			id: "catalog",
-			at: now - 2 * 60 * 60_000,
-			icon: <RefreshCw size={14} />,
-			title: "Model catalog synced",
-			meta: "42 models across 3 providers",
+			at: now - 24 * minute,
+			method: "GET",
+			path: "/v1/models",
+			status: 200,
+			model: null,
+			provider: null,
+			keyName: "laptop",
+			tokens: 0,
+			latencyMs: 2,
+			costUsd: 0,
+		},
+		{
+			at: now - 31 * minute,
+			method: "POST",
+			path: "/v1/chat/completions",
+			status: 200,
+			model: "claude-sonnet-4-5",
+			provider: "anthropic",
+			keyName: "laptop",
+			tokens: 842,
+			latencyMs: 398,
+			costUsd: 0.0061,
+		},
+		{
+			at: now - 43 * minute,
+			method: "POST",
+			path: "/v1/messages",
+			status: 500,
+			model: "gpt-5.6-sol",
+			provider: "openai-codex",
+			keyName: "desktop",
+			tokens: 0,
+			latencyMs: 2180,
+			costUsd: 0,
+		},
+		{
+			at: now - 58 * minute,
+			method: "POST",
+			path: "/v1/chat/completions",
+			status: 429,
+			model: "claude-sonnet-4-5",
+			provider: "anthropic",
+			keyName: "ci",
+			tokens: 0,
+			latencyMs: 1,
+			costUsd: 0,
 		},
 	];
 }
