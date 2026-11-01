@@ -84,11 +84,16 @@ Bare ids resolve through a fixed preference order (`anthropic`, `openai-codex`, 
 `web/` is a Vite + React 19 console wired to the [Arc](https://uiarc.dev) component registry. Arc items are copied into `web/src/components/arc`, not installed as an npm package.
 
 ```bash
+bun run dev      # repo root: broker + console on http://127.0.0.1:5173
+
 cd web
 bun install
-bun run dev      # http://127.0.0.1:5173
 bun run build    # typecheck + production bundle
 ```
+
+`bun run dev` from the repo root starts both processes in one foreground job: the broker on `OMP_BROKER_BIND` (default `127.0.0.1:4000`) and Vite on the first free port from `OMP_WEB_PORT` (default `5173`, `--strictPort`, so it never silently moves). It waits for `/healthz` before starting Vite, points the console's `/api` proxy at the broker it just started, and tears both down on Ctrl-C or when either exits. Arguments after `--` go to Vite, so `bun run dev -- --host 0.0.0.0` exposes the console only.
+
+To run them separately, start `bun run serve` in one terminal and `cd web && bun run dev` in another. The Vite dev and preview servers proxy `/api` to the broker at `http://127.0.0.1:4000` by default and ask for the token printed by `bun run token`; set `OMP_BROKER_URL` (or `VITE_BROKER_PROXY_TARGET`) for a different proxy target, or `VITE_BROKER_URL` to call another origin directly. When serving a built `dist/` without Vite, reverse-proxy `/api` to the broker or set `VITE_BROKER_URL` at build time.
 
 The shell follows the Circle/Linear layout: a 244px shadcn sidebar, Geist typography, 6px panel radii, bordered metric and activity grids, and Arc widgets for cards, charts, the activity heatmap, and the timeline. The usage widget is Bencho's StackedBars. Metrics, charts, usage, and activity currently use deterministic preview data while the logs page is being built; the gateway status badge polls `/healthz` for real state.
 
@@ -98,6 +103,7 @@ Add more items from `web/` with the shadcn CLI, for example `bunx shadcn@latest 
 
 | Command                     | Purpose                                                   |
 | --------------------------- | --------------------------------------------------------- |
+| `bun run dev`               | Start the broker and the web console together             |
 | `bun run serve`             | Start the gateway on `127.0.0.1:4000`                     |
 | `bun run login <provider>`  | OAuth or API-key login, persisted to the credential store |
 | `bun run logout <provider>` | Remove one provider's stored credentials                  |

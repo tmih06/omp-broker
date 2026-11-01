@@ -8,6 +8,7 @@
     "omp-broker": "./src/bin.ts"
   },
   "scripts": {
+    "dev": "bun run --no-orphans scripts/dev.ts",
     "start": "bun run src/cli.ts serve",
     "serve": "bun run src/cli.ts serve",
     "login": "bun run src/cli.ts login",
