@@ -31,8 +31,8 @@
     "healthcheck": "bun run src/cli.ts healthcheck"
   },
   "dependencies": {
-    "@oh-my-pi/pi-ai": "18.13.1",
-    "@oh-my-pi/pi-catalog": "18.13.1"
+    "@oh-my-pi/pi-ai": "18.14.0",
+    "@oh-my-pi/pi-catalog": "18.14.0"
   },
   "devDependencies": {
     "@types/bun": "latest",
